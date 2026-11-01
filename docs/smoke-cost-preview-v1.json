@@ -1,0 +1,62 @@
+{
+  "provider": "openai",
+  "model": "gpt-5.6-terra",
+  "mode": "live",
+  "experiment_kind": "smoke",
+  "protocol_version": "phase2-v1",
+  "planned_runs": 3,
+  "shuffle_seed": 20261101,
+  "per_run_limits": {
+    "max_steps": 12,
+    "max_tool_calls": 20,
+    "max_retries": 2,
+    "max_corrections": 1,
+    "elapsed_s": 90.0,
+    "tool_timeout_s": 0.05,
+    "max_model_calls": 8,
+    "max_tokens": 24000,
+    "max_recovery_actions": 10,
+    "model_timeout_s": 25.0,
+    "max_output_tokens": 768,
+    "max_input_estimate": 12000
+  },
+  "output_directory": "results/live-smoke-v1",
+  "usage_assumptions": {
+    "requests_per_run": 4,
+    "input_tokens_per_request": 1500,
+    "output_tokens_per_request": 256
+  },
+  "estimated_input_tokens": 18000,
+  "estimated_output_tokens": 3072,
+  "estimated_cost_usd": 0.072864,
+  "conditional_planning_ceiling_usd": 0.941184,
+  "pricing": {
+    "model": "gpt-5.6-terra",
+    "provider": "openai",
+    "input_per_million": 2.0,
+    "output_per_million": 12.0,
+    "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+    "retrieved_on": "2026-11-01",
+    "currency": "USD",
+    "cache_write_multiplier": 1.25
+  },
+  "billing_cap_guaranteed": false,
+  "ceiling_conditions": "Assumes actual prompt tokens do not exceed enforced UTF-8 byte estimate + framing allowance; no cache discount, no SDK retries, configured output caps honored. Provider tokenization/accounting can differ. Not a billing guarantee.",
+  "schedule": [
+    {
+      "scenario": "lookup-exception",
+      "policy": "resilient",
+      "repeat": 0
+    },
+    {
+      "scenario": "lookup-control",
+      "policy": "resilient",
+      "repeat": 0
+    },
+    {
+      "scenario": "correlation-write-lost-response",
+      "policy": "resilient",
+      "repeat": 0
+    }
+  ]
+}

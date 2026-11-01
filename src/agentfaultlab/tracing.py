@@ -32,8 +32,21 @@ class Trace:
         self.run_id, self.scenario_id = run_id, scenario_id
         self.clock, self.start = clock, clock()
         self.events: list[TraceEvent] = []
+        self.calls = {}
+
+    def register_call(self, call):
+        self.calls[call.id] = call
 
     def emit(self, event_type: str, payload=None, **fields) -> None:
+        call = self.calls.get(fields.get("call_id"))
+        if call:
+            for key, value in {
+                "root_call_id": call.root_call_id or call.id,
+                "parent_call_id": call.parent_call_id,
+                "attempt": call.attempt,
+                "owner": call.owner,
+            }.items():
+                fields.setdefault(key, value)
         self.events.append(
             TraceEvent(
                 run_id=self.run_id,

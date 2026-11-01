@@ -21,6 +21,11 @@ def test_dashboard_load_filters_playback_and_empty_state(tmp_path):
     comparison = app.dataframe[0].value
     assert comparison.iloc[0]["completed / runs"] == "1/1"
     assert len(app.selectbox[0].options) == 1
+    app.sidebar.multiselect(key="policy").set_value([]).run()
+    assert not app.exception
+    assert any("No runs match" in info.value for info in app.info)
+    app.sidebar.text_input[0].set_value(str(app_path.parent / "docs/examples")).run()
+    assert not app.exception and len(app.dataframe) >= 3
     app.sidebar.text_input[0].set_value(str(tmp_path / "empty")).run()
     assert not app.exception
     assert any("No saved runs" in info.value for info in app.info)

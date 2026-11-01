@@ -3,166 +3,158 @@
 **A local experiment lab for injecting controlled tool faults, comparing recovery policies,
 and inspecting evidence-backed agent outcomes.**
 
-A complete local learning MVP: Python tools, strict validation, real async timeouts,
-controlled injection, three recovery policies, deterministic state assertions, JSONL traces,
-JSON/CSV reports, a read-only Streamlit dashboard, and an optional OpenAI tool-calling adapter.
-All tools use synthetic data in memory. Nothing sends emails, spends money, or modifies calendars.
+Phase 2 adds shared resource budgets, traceable recovery, explicit correlation/idempotency
+services, independent invoice evidence and a prepared live-agent pilot. All tools remain local
+and synthetic. Scripted results test this implementation and its recipes, not LLM intelligence.
 
-## Open and run on this Mac
+## Open and explore on this Mac
 
-Project: `/Users/saugat/Desktop/AgentFaultLab`.
-In VS Code choose **File → Open Folder → Desktop → AgentFaultLab**, then **Terminal → New Terminal**.
-Or run `code ~/Desktop/AgentFaultLab` if the VS Code shell command is installed.
-Select `.venv/bin/python` with **Python: Select Interpreter**.
+Project: `~/Desktop/AgentFaultLab`. In VS Code choose **File → Open Folder → Desktop →
+AgentFaultLab**, then **Terminal → New Terminal**. Select `.venv/bin/python` as the interpreter.
+If the `code` shell command is installed, `code ~/Desktop/AgentFaultLab` also opens it.
 
 ```sh
 cd ~/Desktop/AgentFaultLab
 source .venv/bin/activate
-agentfaultlab demo
-agentfaultlab compare --results results/demo
+agentfaultlab run --config configs/phase2/offline-v1.yaml
+agentfaultlab compare --results results/phase2-offline-v1
 streamlit run app.py
 ```
 
-Open <http://127.0.0.1:8501> for the dashboard. Stop it with Ctrl-C.
-The demo takes a few seconds and makes 45 **scripted** runs: 12 fault cases plus 3 controls,
-each under 3 policies. Installation needs package downloads; subsequent offline runs need
-neither credentials nor network access.
+Open <http://127.0.0.1:8501> and enter `results/phase2-offline-v1` in **Results directory**.
+The expanded suite makes 75 scripted runs: 25 scenarios × 3 policies. Filter to one scenario
+before comparing configurations; unsupported claims, uncertainty and induced unsafe state are
+shown separately. The chart axes are fixed at 0–100%, with separate completion/recovery panels.
 
-To inspect one run without executing it:
+The original 15-case suite still works:
 
 ```sh
-agentfaultlab run --config configs/demo.yaml
-agentfaultlab inspect "$(find results/demo -name '*.run.json' -print -quit)"
+agentfaultlab demo
+agentfaultlab compare --results results/offline-v2
 ```
 
-`results/demo/manifest.json` identifies the latest experiment. Old uniquely named run files
-are retained; comparison and dashboard loading follow the manifest to avoid mixing experiments.
-Each run has a `.run.json` summary and `.jsonl` event trace, plus experiment-level
-`summary.json`, `summary.csv`, and `runs.csv`. Dashboard filters and downloads use these files.
-Playback means loading saved events, not deterministic re-execution.
+New demo output defaults to `results/offline-v2`; the original `results/demo` artifacts and
+committed `docs/examples` snapshots are preserved. Every new run is labeled `phase2-v1`.
+Use a new output directory for a new study; the manifest selects the most recent experiment
+while retaining older uniquely named run files.
 
-## Install on another machine
+Saved-run playback requires neither a key nor execution:
 
-Use Python 3.11 or later. Do not use macOS's system Python 3.9.
+```sh
+agentfaultlab inspect "$(find results/phase2-offline-v1 -name '*.run.json' -print -quit)"
+```
+
+## What works offline
+
+- Nine fault kinds: unknown tool, missing/mistyped argument, temporary exception, genuine
+  timeout, rate limit with Retry-After, malformed output, plausible wrong data, committed write
+  with lost response. Rules have tool/occurrence selectors, transient/persistent behavior and seeds.
+- Fail fast, bounded safe retry, and resilient deterministic recipes. Global run budgets cover
+  decisions, model requests, boundary calls, started handlers, recovery actions, elapsed time
+  and available usage. Retry/correction limits are per original call.
+- Resettable lookup, calculation and creation tasks with independent final-state assertions.
+- Explicit correlation-key service permits duplicates; idempotent service deduplicates equivalent
+  requests and rejects key/content conflicts. Ambiguous writes are reconciled, never blindly retried.
+- Independent invoice sources include separate stored data and source/authority provenance.
+  The original corruption failure remains; peer disagreement and missing reference evidence abstain.
+- Original/child call lineage, supporting verification IDs, explicit synthesized-result events,
+  JSONL diagnostic traces and separate model-visible transcripts; JSON/CSV reports and downloads.
+- Native provider adapter exercised entirely through controlled HTTP responses, plus dashboard tests.
+
+The write fixtures deliberately include multiple records/conflicting content. Their unsafe state
+is counted even when middleware correctly refuses to claim completion; it is not hidden behind
+a recovery metric. Independent-source agreement cannot detect correlated corruption in both stores.
+
+## Architecture and learning
+
+```text
+CLI/YAML → runner + RunBudget → scripted agent or native provider adapter
+                ↓
+          Recovery + Recipe registry → ToolExecutor → validated synthetic tools + faults
+                ↓                            ↓
+          model-visible result         diagnostic lineage / verified state changes
+                ↓                            ↓
+          independent evaluator → JSON/CSV + JSONL → read-only Streamlit playback
+```
+
+Read first: [Phase 2 learning walkthrough](docs/phase2-learning.md),
+[tool executor](src/agentfaultlab/executor.py), and [recovery policies](src/agentfaultlab/policies.py).
+[Design](docs/design.md), [metrics](docs/metrics.md), [audit](docs/phase2-audit.md), and
+[related work](docs/related-work.md) explain contracts and positioning. This project does not
+claim to be the first agent fault-testing framework or production-ready infrastructure.
+
+## Live execution is prepared, not performed
+
+The versioned [protocol](docs/live-pilot-protocol.md) specifies a three-run smoke test followed
+by a separately authorized 60-run pilot. It compares **agent-plus-middleware configurations**.
+The same model, task instructions, tools and fault schedule are used across policies; prompts
+do not identify the policy. Each run resets state and conversation, and a recorded seed shuffles
+execution order. Native calls execute sequentially in response-array order. If execution stops,
+remaining calls are explicitly marked skipped rather than silently discarded.
+
+Review configuration and cost without credentials or network:
+
+```sh
+agentfaultlab run --config configs/phase2/smoke-v1.yaml --dry-run
+agentfaultlab run --config configs/phase2/pilot-v1.yaml --dry-run
+```
+
+Prepared model: `gpt-5.6-terra`, reasoning effort `none`. Pricing is explicit with official source
+URL and retrieval date in each config. Under the stated usage assumptions the smoke estimate is
+$0.072864; its conditional planning ceiling is $0.941184. These are **not guaranteed billing caps**.
+See the committed [smoke preview](docs/smoke-cost-preview-v1.json) and
+[pilot preview](docs/pilot-cost-preview-v1.json). Provider access, rates and hosted model revisions
+can change; review the source and your account before authorizing execution.
+
+After reviewing the concrete protocol, provide the key privately using macOS zsh:
+
+```sh
+read -s "OPENAI_API_KEY?OpenAI API key: "
+export OPENAI_API_KEY
+# Explicit authorization for three paid smoke runs:
+agentfaultlab run --config configs/phase2/smoke-v1.yaml --allow-paid
+```
+
+The command is provided for the user; it has **not** been executed during development.
+Do not start the pilot until you have reviewed the smoke artifacts and authorized it separately.
+The CLI refuses live execution without `--allow-paid`. Credentials come from the environment;
+.env files are not automatically loaded. Never put a key in YAML, source, traces or commits.
+
+Provider authentication, rate-limit, connection, timeout, service and truncated/protocol responses
+are tracked separately from injected tool errors and harness bugs. SDK automatic retries are off.
+Client input estimates and output caps help bound spend; they cannot guarantee exact billing.
+No live robustness results are claimed.
+
+## Installation and checks
+
+The existing isolated environment is ready on this Mac. On a fresh machine with Python 3.11+:
 
 ```sh
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev,live]'
-```
-
-The environment already created on this Mac uses locally available CPython 3.12.16.
-Its base interpreter lives in the existing `~/Desktop/evidenceguard/.runtime/` tree; no files
-there were changed. If that tree is moved, recreate `.venv` using another Python 3.11+ installation.
-`requirements-lock.txt` captures the exact installed runtime and test packages for Python 3.12
-on this Mac. To reproduce those versions in a fresh compatible environment:
-
-```sh
-python -m pip install -r requirements-lock.txt
-python -m pip install --no-deps -e .
-```
-
-The lock snapshot is not a universal cross-platform lock. `pyproject.toml` provides compatible
-dependency ranges for other supported environments.
-
-## What is being compared?
-
-| Policy | Deterministic middleware | Scripted / live agent decisions |
-| --- | --- | --- |
-| Fail fast | Stop on the first unrecovered tool error | Normal task steps and checks |
-| Bounded retry | Retry explicitly transient, retry-safe calls with limits and backoff | Normal task steps and checks |
-| Resilient | Add task-bound argument correction, malformed-output feedback, fallback after exhausted lookup errors, and write-state reconciliation | The script chooses the vetted secondary on disagreement; live models choose their next native call from observed feedback |
-
-Middleware is ordinary Python policy logic. Scripted behavior is a small domain program.
-Neither is evidence of autonomous model reasoning. The same three policies can wrap live
-models, but hosted results are stochastic and require repeated runs.
-
-The curated fake create service does not enforce idempotency keys: an unguarded repeat really
-can create duplicates. Keys enable state reconciliation, and an optional fake-backend setting
-can enforce deduplication. The create tool is marked unsafe to retry after ambiguity.
-The project makes no claim to be the first agent fault-testing framework; see
-[related work](docs/related-work.md).
-
-## Architecture
-
-```text
-CLI / YAML config → runner → scripted agent or OpenAI adapter
-                            ↓ observable decision
-                         recovery policy
-                            ↓ every attempt
-                         tool executor → strict schemas → fault injector → fake environment
-                            ↓ observed result
-                         agent observation
-runner → deterministic state/evidence assertions → JSONL + JSON/CSV → Streamlit playback
-```
-
-`src/agentfaultlab/` has separate schemas, tools, faults, executor, agents, policies, scenarios,
-runner, scoring, reporting, CLI, live adapter, tracing, and dashboard modules. The core imports
-neither Streamlit nor OpenAI. [Design](docs/design.md) explains occurrence counting,
-ownership, deadlines, evidence isolation, and extension points.
-
-The 12 fault cases cover unknown tools, missing and mistyped arguments, temporary exceptions,
-timeouts, rate limits, malformed outputs, plausible incorrect data, committed writes with
-lost responses, and an unavailable write service. Three fault-free controls isolate baseline behavior.
-
-## Optional live LLM mode
-
-The adapter uses OpenAI Chat Completions with native strict function tools and a structured
-terminal response. Use an account-accessible model supporting those features. There is no
-hard-coded model default. No API key was present during development; real model behavior
-has **not** been evaluated. Mocked HTTP tests exercise the installed OpenAI SDK.
-
-```sh
-source .venv/bin/activate
-python -m pip install -e '.[live]'  # Already installed on this Mac
-read -s "OPENAI_API_KEY?OpenAI API key: "
-export OPENAI_API_KEY
-cp configs/live.example.yaml configs/live.local.yaml
-# Edit model in configs/live.local.yaml to a model ID available to your account.
-agentfaultlab run --config configs/live.local.yaml
-```
-
-The `read` command above uses macOS zsh and avoids putting the key in shell history.
-`.env.example` is documentation only; `.env` files are not automatically loaded.
-Never paste credentials into YAML, source files, traces, or commits. Live model requests incur
-provider charges; all called tools remain local synthetic functions.
-Three repeats are only a smoke experiment. Seeded injection does not make hosted inference
-deterministic. Dollar cost remains unavailable; no undocumented pricing is assumed.
-
-To opt into a real-provider test explicitly, set `AGENTFAULTLAB_MODEL`, `OPENAI_API_KEY`, and
-`AGENTFAULTLAB_LIVE_TEST=1`, then run `pytest -m live`. Default tests and CI do not use the network.
-
-## Checks
-
-```sh
 ruff check .
 ruff format --check .
 pytest -q
 python -m pip check
 ```
 
-Tests cover the entire offline matrix, boundary validation, occurrence and seed behavior,
-actual timeout cancellation, budgets and Retry-After, fresh state, corruption, reconciliation,
-false claims, harness/evaluator errors, trace loading/redaction, CLI commands, the dashboard,
-and mocked native provider messages. GitHub Actions contains offline checks for Python
-3.11 and 3.12; this local project has not been pushed or published.
+The local environment uses CPython 3.12.16 from the existing
+`~/Desktop/evidenceguard/.runtime/` installation; that project was not modified. Recreate `.venv`
+with another Python 3.11+ installation if the base interpreter moves. `requirements-lock.txt`
+captures the installed Mac/Python 3.12 package snapshot; it is not a universal cross-platform lock.
 
-## Limits and next steps
+Default tests make no provider requests. Tests marked live require all of `AGENTFAULTLAB_LIVE_TEST=1`,
+`AGENTFAULTLAB_MODEL` and `OPENAI_API_KEY`, with `pytest -m live`; do not use that during an offline check.
+GitHub Actions defines offline checks only. Nothing has been pushed, published or deployed.
+Actual executed checks and limitations: [Phase 2 verification](docs/phase2-verification.md).
 
-- This is a small synthetic lab, not production infrastructure or a general model benchmark.
-- Trusted fallback selection and argument correction are domain-specific and deliberately bounded.
-- Schema-valid invoice corruption can pass arithmetic validation. The deterministic evaluator
-  catches the wrong state and unsupported success claim; the agent has no independent invoice source.
-- No deliberately unsafe retry policy is included. A boundary test demonstrates that a blind
-  retry duplicates records; supported policies preserve zero duplicates in the curated suite.
-- Python cancellation is cooperative. External blocking tools or cancellation-resistant handlers
-  need stronger process isolation. This simulator uses cooperative async handlers.
-- Token budgets stop on reported usage and cap requested completion tokens. Prompt usage is
-  known after each response, so the last request can overshoot; see [metrics](docs/metrics.md).
-- Redaction is heuristic, not a PII or credential detection guarantee. Traces are local sensitive
-  artifacts and contain synthetic task data plus live model outputs when used.
-- There is no persistent database, telemetry backend, distributed execution, or live-provider
-  benchmark. See the [roadmap](docs/roadmap.md).
+## Limits
 
-Read first: [learning guide](docs/learning-guide.md),
-[tool executor](src/agentfaultlab/executor.py), and [recovery policies](src/agentfaultlab/policies.py).
+A small synthetic suite does not establish general robustness. Recipes and source authority are
+domain contracts, not autonomous model reasoning or authenticated provenance. Token estimates
+can differ from provider accounting. Python cancellation requires cooperative handlers; cleanup
+and final export add small overhead outside orchestration. Redaction is heuristic, not a guarantee
+against arbitrary credentials/PII. Keep traces local and review before sharing. No database,
+production integration, distributed safety proof or telemetry backend is included. See the
+[roadmap](docs/roadmap.md).

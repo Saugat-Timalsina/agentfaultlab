@@ -1,0 +1,159 @@
+{
+  "run_id": "correlation-write-lost-response-resilient-61e87db69f",
+  "scenario_id": "correlation-write-lost-response",
+  "family": "creation",
+  "policy": "resilient",
+  "mode": "scripted",
+  "model": null,
+  "seed": 20261101,
+  "repeat": 0,
+  "fault_type": "commit_timeout",
+  "fault_planned": {
+    "id": "correlation-lost",
+    "kind": "commit_timeout",
+    "target_tool": "create_correlation_ticket",
+    "occurrence": 1,
+    "behavior": "transient",
+    "probability": 1,
+    "seed": 20261101,
+    "retry_after": 0.005,
+    "additional_rules": []
+  },
+  "fault_activations": 1,
+  "completed": true,
+  "recovered": true,
+  "safe": true,
+  "safe_failure": false,
+  "honest": true,
+  "duplicate_side_effects": 0,
+  "invalid_tool_calls": 0,
+  "agent_invalid_calls": 0,
+  "injected_invalid_calls": 0,
+  "retries": 0,
+  "fallbacks": 0,
+  "corrections": 0,
+  "tool_calls": 3,
+  "model_calls": 0,
+  "steps": 3,
+  "duration_s": 0.029180792000261135,
+  "input_tokens": null,
+  "output_tokens": null,
+  "dollar_cost": null,
+  "stop_reason": "agent_finished",
+  "harness_error": null,
+  "assertions": {
+    "exactly_one_record": true,
+    "matching_record": true,
+    "existence_verified": true,
+    "no_duplicates": true
+  },
+  "expected_state": {
+    "record_count": 1,
+    "title": "Investigate sensor",
+    "request_key": "request-001"
+  },
+  "actual_state": {
+    "records": [
+      {
+        "id": "T-1",
+        "title": "Investigate sensor",
+        "request_key": "request-001",
+        "service": "correlation"
+      }
+    ],
+    "answer": null
+  },
+  "final_answer": "T-1",
+  "final_status": "complete",
+  "dependency_versions": {
+    "python": "3.12.16",
+    "agentfaultlab": "0.1.0",
+    "pydantic": "2.14.2",
+    "typer": "0.27.3",
+    "streamlit": "1.66.1",
+    "PyYAML": "6.0.3",
+    "openai": "3.42.0"
+  },
+  "config": {
+    "scenarios": [
+      "all"
+    ],
+    "policies": [
+      "fail_fast",
+      "bounded_retry",
+      "resilient"
+    ],
+    "mode": "scripted",
+    "model": null,
+    "seed": 20261101,
+    "repeats": 1,
+    "output_dir": "results/phase2-offline-v1",
+    "budgets": {
+      "max_steps": 18,
+      "max_tool_calls": 24,
+      "max_retries": 2,
+      "max_corrections": 1,
+      "elapsed_s": 4,
+      "tool_timeout_s": 0.025,
+      "max_model_calls": 12,
+      "max_tokens": 6000,
+      "max_recovery_actions": 16,
+      "model_timeout_s": 30,
+      "max_output_tokens": 1024,
+      "max_input_estimate": 16000
+    },
+    "suite_version": "phase2-v1",
+    "experiment_kind": "scripted",
+    "protocol_version": "phase2-v1",
+    "shuffle": true,
+    "pricing": null,
+    "reasoning_effort": null,
+    "estimated_requests_per_run": 4,
+    "estimated_input_per_request": 1500,
+    "estimated_output_per_request": 256
+  },
+  "trace_file": "correlation-write-lost-response-resilient-61e87db69f.jsonl",
+  "artifact_version": "phase2-v1",
+  "experiment_kind": "scripted",
+  "provider_error": null,
+  "uncertain": false,
+  "recovery_actions": 2,
+  "actual_executions": 3,
+  "fault_rules_planned": 1,
+  "fault_rules_activated": 1,
+  "assertion_details": {
+    "exactly_one_record": {
+      "passed": true,
+      "expected": 1,
+      "observed": 1
+    },
+    "matching_record": {
+      "passed": true,
+      "expected": {
+        "record_count": 1,
+        "title": "Investigate sensor",
+        "request_key": "request-001"
+      },
+      "observed": [
+        {
+          "id": "T-1",
+          "title": "Investigate sensor",
+          "request_key": "request-001",
+          "service": "correlation"
+        }
+      ]
+    },
+    "existence_verified": {
+      "passed": true,
+      "expected": "find_correlation_ticket",
+      "observed": [
+        "find_correlation_ticket"
+      ]
+    },
+    "no_duplicates": {
+      "passed": true,
+      "expected": 0,
+      "observed": 0
+    }
+  }
+}

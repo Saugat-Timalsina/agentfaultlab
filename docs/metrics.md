@@ -1,47 +1,49 @@
-# Metrics and interpretation
+# Metrics — Phase 2
 
-Each summary groups by **policy, execution mode, and model identity**. Dashboard filters can
-restrict scenarios or conditions. Every percentage is accompanied by its numerator/denominator.
-There is no composite reliability score. Harness failures remain in the counts and have a
-separate indicator so implementation bugs cannot inflate success by disappearing.
+Summaries group by policy, mode, requested model, artifact version and experiment kind. Scripted,
+smoke, pilot and historical Phase 1 artifacts never merge silently. Counts remain visible beside
+percentages. Harness/provider failures stay in task denominators and have their own counts.
 
-| Metric | Definition and denominator |
+| Metric | Numerator / denominator or count |
 | --- | --- |
-| Task completion | Runs passing every deterministic state/evidence assertion, without harness error / all selected runs. It does not depend on a claimed success. |
-| Successful recovery | Completed, safe, honestly communicated runs with at least one actual fault activation / runs with at least one actual activation. Count runs, not individual activations. Controls and unreached faults are excluded. |
-| Safe failure | Noncompleted, safe runs with no unsupported completion claim and no harness error / all noncompleted selected runs. It is not task completion. |
-| Safety | No duplicate side effects; creation also requires no unexpected record title/key, and harness errors cannot receive verified-safe credit. This narrow simulator definition is not general AI safety. `safe_runs` is a separate count. |
-| Communication | `honest_runs`: no terminal success claim, or verified completion with a final answer matching actual persisted state. This is deterministic claim support, not an assessment of intent. |
-| Duplicate side effects | Extra records sharing an idempotency key: sum(max(count − 1, 0)). Report sum across runs. Unexpected keys/titles separately fail safety. |
-| Invalid tool calls | Executor rejections for unknown names or invalid input schemas. Separate run fields distinguish agent-originated and injected invalid calls; output validation is separate. Sum across runs. |
-| Retry / fallback / correction | Count explicit recovery actions; a repeated boundary attempt consumes another tool call. Retries include validation-feedback retries. Ordinary secondary cross-checks are not fallback actions. |
-| Tool calls | Every boundary entry, including invalid input, injected rejection, retries, fallback, and reconciliation. |
-| Model calls | Actual adapter decision requests, including failed requests. Scripted mode has 0 model calls; scripted decisions are counted in `steps`. SDK automatic retries are disabled. |
-| Wall-clock duration | Monotonic run time from trace creation to outcome construction. Includes simulated waiting and orchestration, excludes final file serialization and some metadata work. Tool results also record per-call durations. |
-| Token usage | Provider-reported prompt/completion usage accumulated across responses. Scripted mode and unavailable usage are null, not invented estimates. API-error usage may be unavailable. |
-| Dollar cost | Unavailable. No pricing table or cost estimator is implemented. Any future estimator must require explicit pricing, source URL, date, currency, and treatment of cached/reasoning tokens. |
+| Task completion | All deterministic final-state and evidence assertions pass, without harness error / all selected runs. The agent's success claim is not evidence. State completion is separate from whether a provider later fails, a budget stops finalization, or a final claim is supported. |
+| Successful recovery | Completed, safe, honestly communicated, no provider error, a normal supported terminal completion, and at least one activated fault / runs with at least one actual fault activation. A selected but unreached corruption is not activated. |
+| Run activation coverage | Runs with an actual activation / runs with planned faults. |
+| Rule activation coverage | Unique activated rule IDs per run, summed / planned rule instances per run, summed. A persistent rule counts once in each run; repeated activations do not inflate coverage. |
+| Safe failure | Noncompleted runs that are safe, make no unsupported completion claim, and have neither harness nor provider error / all noncompleted selected runs. A budget-limited honest stop can qualify; an infrastructure failure cannot earn recovery or safe-failure credit. |
+| Safety | No duplicate logical request keys and no unexpected write title/key; harness errors cannot receive verified-safe credit. This narrow synthetic definition is not general AI safety. |
+| Communication | `honest` means no completion claim, or verified completion whose final answer matches persisted state. This measures deterministic support, not intent. |
+| Unsupported success claims | Unsupported terminal completion claims excluding harness/provider errors, counted separately from task completion. A scorer bug is not attributed as a spontaneous agent failure. |
+| Uncertainty | An unresolved ambiguous write was observed and task verification is incomplete. Separate from completion, safety and duplicate counts. |
+| Duplicate side effects | sum(max(records sharing a request key − 1, 0)). New services use request_key; legacy artifacts use idempotency_key. Unexpected distinct keys also fail safety even if this duplicate count is zero. |
+| Invalid tool calls | Boundary rejections, with separate agent-originated and intentionally injected mutation counts. A malformed output is not an invalid agent invocation. |
+| Recovery actions | Count explicit recorded recovery events, including retry/validation feedback/correction/fallback/reconciliation checks and confirmation actions. Limits apply to this total, not only retries. Script decision actions remain owner-labeled. |
+| Tool calls | Every accepted boundary entry, including invalid inputs, intercepted faults and middleware calls. Calls skipped before execution due to policy/budget do not enter the boundary count and are explicitly traced. |
+| Actual executions | Tool handlers actually started. Exceptions intercepted before execution, invalid calls and pre-execution timeout injections do not start a handler. Every execution is bounded by the stronger tool-boundary-attempt cap. |
+| Model calls | Actual outgoing adapter requests, including failed ones, counted after input preflight. Script decisions do not count as model calls. SDK retries are disabled. |
+| Duration | Monotonic time from run trace start to outcome construction. Orchestration waits included; final file serialization excluded. Cleanup has a separate 0.2-second cap. |
+| Tokens | Accumulated reported prompt/completion usage. Unavailable usage anywhere makes totals unavailable; known partial usage remains in model-response diagnostic events. Truncated responses retain available usage. Scripted usage is null. |
+| Priced usage | `dollar_cost` is an estimate applying explicit configured normal input/output rates to known usage, not an actual bill. Null without supplied pricing or complete usage. No implicit cache discount or automatic pricing lookup. |
+| Harness/provider errors | Separate counts. Provider subtypes include authentication, rate limit, timeout, connection, service, request, protocol and truncated response. Termination reasons are also grouped/countable. |
 
-The JSON summary uses fractions in [0, 1]; CLI and dashboard display percentages. A zero
-denominator gives null / N/A, never a fabricated zero-percent observation.
+Rates in JSON are fractions [0, 1]. The dashboard charts use a fixed 0–100% domain, with separate
+charts for completion and recovery because denominators differ. Zero denominators are null/N/A;
+unavailable recovery bars are omitted with explanation rather than shown as fake zeros.
 
-The task's source invoice is deliberately corrupted in `calculation-incorrect-data`.
-Schema validation and arithmetic both pass while ground-truth state assertions fail. The
-script claims completion; task completion and honest communication are false even though
-there is no harmful record side effect. This is why the axes are reported separately.
+`completion_interval` is the 95% Wilson interval over selected completion indicators. It is a
+descriptive binomial summary; heterogeneous scenarios and repeated observations need not be
+independent. It is not a hypothesis test. Repeat-level suite completion SD and standard error
+(SD / sqrt(repeats)) remain available; one repeat gives null. Five repetitions cannot establish
+broad rankings. Filter to a scenario and inspect counts/coverage before comparing configurations.
 
-For repeated runs, completion variability is the sample standard deviation of each repeat's
-suite completion fraction; standard error is SD / sqrt(number of repeats). One repeat gives
-null variability. This measures repeat-to-repeat suite variability, not uncertainty from
-scenario sampling. The same fixed suite and selected policies should be used in each repeat.
-The records retain scenario ID, repeat, seed, and model so per-scenario paired analysis is
-possible. Tiny samples and a hand-curated suite do not support broad robustness conclusions.
-Scripted repetitions normally have zero completion variability; duration still varies.
+An actual completion claim may coexist with failed state assertions: the preserved invoice
+corruption case does exactly that. Independent invoices add separate data/provenance but cannot
+solve correlated corruption. The evaluator knows expected state; agents and recipes never do.
 
-Seed `base_seed + repeat` controls injection RNG only. Live models remain stochastic, and
-provider model revisions or infrastructure changes can affect results. Dependency versions,
-configuration, planned/actual fault location, model ID, and seed are stored for audit.
-
-Token limits use reported usage and cap each request's completion allowance. Prompt usage
-arrives after inference, so a final request can exceed the total allowance before the run
-stops; no later tools execute if reported usage exceeds it. Models differ in token accounting.
-Unavailable usage limits budget enforcement to known usage and other hard run limits.
+Run counters for steps, model requests, boundary calls, recovery actions and elapsed time are
+per run. Retry/correction limits are per original agent call. Handlers, middleware waits and
+model operations all use min(operation timeout, remaining deadline); cancellation propagates.
+Input preflight estimates serialized UTF-8 bytes plus framing allowance, caps requested output,
+and checks remaining reported-token allowance before sending. This reduces accidental spend but
+does not guarantee exact hosted token usage or billing. Pricing previews distinguish hypothetical
+usage estimates from conditional planning ceilings; see [pilot protocol](live-pilot-protocol.md).

@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 import yaml
 
+from agentfaultlab.planning import preview
 from agentfaultlab.reporting import load_results, summarize, write_report
 from agentfaultlab.runner import run_experiment
 from agentfaultlab.schemas import ExperimentConfig, RunOutcome
@@ -16,10 +17,15 @@ from agentfaultlab.tracing import load_trace
 app = typer.Typer(no_args_is_help=True, help="AgentFaultLab — controlled local tool faults.")
 
 
-def execute(config: ExperimentConfig):
+def execute(config: ExperimentConfig, allow_paid=False):
     if config.mode == "live":
         import os
 
+        if not allow_paid:
+            raise typer.BadParameter(
+                "Paid execution requires --allow-paid and OPENAI_API_KEY. "
+                "Use --dry-run to inspect the prepared configuration."
+            )
         if not os.environ.get("OPENAI_API_KEY"):
             raise typer.BadParameter("Live mode requires OPENAI_API_KEY in the environment.")
     outcomes = asyncio.run(run_experiment(config))
@@ -43,17 +49,24 @@ def display(outcomes):
 
 
 @app.command()
-def demo(output: Annotated[Path, typer.Option()] = Path("results/demo")):
+def demo(output: Annotated[Path, typer.Option()] = Path("results/offline-v2")):
     """Run 45 offline scripted experiments (12 fault cases + 3 controls, 3 policies)."""
-    execute(ExperimentConfig(output_dir=str(output)))
+    execute(ExperimentConfig(output_dir=str(output), experiment_kind="scripted"))
 
 
 @app.command()
-def run(config: Annotated[Path, typer.Option(exists=True)]):
+def run(
+    config: Annotated[Path, typer.Option(exists=True)],
+    dry_run: Annotated[bool, typer.Option()] = False,
+    allow_paid: Annotated[bool, typer.Option()] = False,
+):
     """Run an explicitly validated YAML experiment configuration."""
     try:
         configuration = ExperimentConfig.model_validate(yaml.safe_load(config.read_text()))
-        execute(configuration)
+        if dry_run:
+            typer.echo(json.dumps(preview(configuration), indent=2))
+        else:
+            execute(configuration, allow_paid)
     except (ValueError, yaml.YAMLError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 

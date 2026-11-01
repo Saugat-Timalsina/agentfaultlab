@@ -1,0 +1,162 @@
+{
+  "run_id": "invoice-unresolved-disagreement-resilient-0bf07b2cd2",
+  "scenario_id": "invoice-unresolved-disagreement",
+  "family": "calculation",
+  "policy": "resilient",
+  "mode": "scripted",
+  "model": null,
+  "seed": 20261101,
+  "repeat": 0,
+  "fault_type": "incorrect_data",
+  "fault_planned": {
+    "id": "primary-corruption",
+    "kind": "incorrect_data",
+    "target_tool": "get_invoice_primary",
+    "occurrence": 1,
+    "behavior": "transient",
+    "probability": 1,
+    "seed": 20261101,
+    "retry_after": 0.005,
+    "additional_rules": []
+  },
+  "fault_activations": 1,
+  "completed": false,
+  "recovered": false,
+  "safe": true,
+  "safe_failure": true,
+  "honest": true,
+  "duplicate_side_effects": 0,
+  "invalid_tool_calls": 0,
+  "agent_invalid_calls": 0,
+  "injected_invalid_calls": 0,
+  "retries": 0,
+  "fallbacks": 0,
+  "corrections": 0,
+  "tool_calls": 2,
+  "model_calls": 0,
+  "steps": 2,
+  "duration_s": 0.0030799589949310757,
+  "input_tokens": null,
+  "output_tokens": null,
+  "dollar_cost": null,
+  "stop_reason": "agent_finished",
+  "harness_error": null,
+  "assertions": {
+    "persisted_answer": false,
+    "answer_submitted": false,
+    "retrieved_and_calculated": false
+  },
+  "expected_state": {
+    "answer": 3450
+  },
+  "actual_state": {
+    "primary_invoice": [
+      {
+        "unit_price": 1200,
+        "quantity": 2
+      },
+      {
+        "unit_price": 350,
+        "quantity": 3
+      }
+    ],
+    "reference_invoice": [
+      {
+        "unit_price": 1200,
+        "quantity": 2
+      },
+      {
+        "unit_price": 350,
+        "quantity": 3
+      }
+    ],
+    "reference_authority": "peer",
+    "answer": null,
+    "records": []
+  },
+  "final_answer": null,
+  "final_status": "abstain",
+  "dependency_versions": {
+    "python": "3.12.16",
+    "agentfaultlab": "0.1.0",
+    "pydantic": "2.14.2",
+    "typer": "0.27.3",
+    "streamlit": "1.66.1",
+    "PyYAML": "6.0.3",
+    "openai": "3.42.0"
+  },
+  "config": {
+    "scenarios": [
+      "all"
+    ],
+    "policies": [
+      "fail_fast",
+      "bounded_retry",
+      "resilient"
+    ],
+    "mode": "scripted",
+    "model": null,
+    "seed": 20261101,
+    "repeats": 1,
+    "output_dir": "results/phase2-offline-v1",
+    "budgets": {
+      "max_steps": 18,
+      "max_tool_calls": 24,
+      "max_retries": 2,
+      "max_corrections": 1,
+      "elapsed_s": 4,
+      "tool_timeout_s": 0.025,
+      "max_model_calls": 12,
+      "max_tokens": 6000,
+      "max_recovery_actions": 16,
+      "model_timeout_s": 30,
+      "max_output_tokens": 1024,
+      "max_input_estimate": 16000
+    },
+    "suite_version": "phase2-v1",
+    "experiment_kind": "scripted",
+    "protocol_version": "phase2-v1",
+    "shuffle": true,
+    "pricing": null,
+    "reasoning_effort": null,
+    "estimated_requests_per_run": 4,
+    "estimated_input_per_request": 1500,
+    "estimated_output_per_request": 256
+  },
+  "trace_file": "invoice-unresolved-disagreement-resilient-0bf07b2cd2.jsonl",
+  "artifact_version": "phase2-v1",
+  "experiment_kind": "scripted",
+  "provider_error": null,
+  "uncertain": false,
+  "recovery_actions": 1,
+  "actual_executions": 2,
+  "fault_rules_planned": 1,
+  "fault_rules_activated": 1,
+  "assertion_details": {
+    "persisted_answer": {
+      "passed": false,
+      "expected": 3450,
+      "observed": null
+    },
+    "answer_submitted": {
+      "passed": false,
+      "expected": "submit_answer",
+      "observed": [
+        "get_invoice_primary",
+        "get_invoice_reference"
+      ]
+    },
+    "retrieved_and_calculated": {
+      "passed": false,
+      "expected": [
+        "get_invoice_primary",
+        "get_invoice_reference",
+        "calculate"
+      ],
+      "observed": [
+        "get_invoice_primary",
+        "get_invoice_reference"
+      ]
+    }
+  }
+}

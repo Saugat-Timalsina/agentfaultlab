@@ -1,0 +1,10 @@
+protocol_version: phase2-v1
+suite_version: phase2-v1
+mode: scripted
+experiment_kind: scripted
+scenarios: [all]
+policies: [fail_fast, bounded_retry, resilient]
+repeats: 1
+shuffle: true
+seed: 20261101
+output_dir: results/phase2-offline-v1

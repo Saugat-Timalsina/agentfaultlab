@@ -21,6 +21,10 @@ class ToolCall(Record):
     id: str
     name: str
     arguments: Any
+    root_call_id: str | None = None
+    parent_call_id: str | None = None
+    attempt: int = 1
+    owner: Literal["model", "scripted_agent", "middleware"] = "scripted_agent"
 
 
 ErrorCategory = Literal[
@@ -49,6 +53,8 @@ class ToolResult(Record):
     data: dict[str, Any] | None = None
     error: ToolError | None = None
     duration_s: float = 0
+    supporting_call_ids: list[str] = Field(default_factory=list)
+    recovery_result: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -96,6 +102,10 @@ class Budgets(Record):
     tool_timeout_s: float = Field(default=0.025, gt=0)
     max_model_calls: int = Field(default=12, ge=1)
     max_tokens: int = Field(default=6000, ge=1)
+    max_recovery_actions: int = Field(default=16, ge=0)
+    model_timeout_s: float = Field(default=30, gt=0)
+    max_output_tokens: int = Field(default=1024, ge=1)
+    max_input_estimate: int = Field(default=16000, ge=1)
 
 
 class Scenario(Record):
@@ -107,9 +117,22 @@ class Scenario(Record):
     expected_state: dict[str, Any]
     acceptable_failure: str = "Stop without claiming completion or creating duplicate records."
     fault: FaultSpec | None = None
+    additional_faults: list[FaultSpec] = Field(default_factory=list)
     budgets: Budgets = Field(default_factory=Budgets)
     # Public task bindings: bounded domain-specific correction, never evaluator truth.
     bindings: dict[str, Any] = Field(default_factory=dict)
+    suite_version: Literal["phase1", "phase2-v1"] = "phase1"
+
+
+class Pricing(Record):
+    model: str
+    provider: Literal["openai"] = "openai"
+    input_per_million: float = Field(ge=0)
+    output_per_million: float = Field(ge=0)
+    source_url: str = Field(pattern=r"^https://")
+    retrieved_on: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    currency: Literal["USD"] = "USD"
+    cache_write_multiplier: float = Field(default=1, ge=1)
 
 
 PolicyName = Literal["fail_fast", "bounded_retry", "resilient"]
@@ -126,6 +149,15 @@ class ExperimentConfig(Record):
     repeats: int = Field(default=1, ge=1, le=100)
     output_dir: str = "results/demo"
     budgets: Budgets = Field(default_factory=Budgets)
+    suite_version: Literal["phase1", "phase2-v1"] = "phase1"
+    experiment_kind: Literal["scripted", "smoke", "pilot", "development"] = "development"
+    protocol_version: str = "phase2-v1"
+    shuffle: bool = False
+    pricing: Pricing | None = None
+    reasoning_effort: str | None = None
+    estimated_requests_per_run: int = Field(default=4, ge=1)
+    estimated_input_per_request: int = Field(default=1500, ge=1)
+    estimated_output_per_request: int = Field(default=256, ge=1)
 
     @model_validator(mode="after")
     def live_requires_model(self):
@@ -133,6 +165,10 @@ class ExperimentConfig(Record):
             raise ValueError("Live mode requires an explicit model ID")
         if not self.policies or not self.scenarios:
             raise ValueError("Select at least one policy and scenario")
+        if self.pricing and self.pricing.model != self.model:
+            raise ValueError("Pricing model must match the configured model")
+        if self.experiment_kind in {"smoke", "pilot"} and self.mode != "live":
+            raise ValueError("Smoke/pilot labels are reserved for opt-in live execution")
         return self
 
 
@@ -149,6 +185,10 @@ class TraceEvent(Record):
     error_category: ErrorCategory | None = None
     recovery_action: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
+    root_call_id: str | None = None
+    parent_call_id: str | None = None
+    attempt: int | None = None
+    owner: str | None = None
 
 
 class Decision(Record):
@@ -159,6 +199,8 @@ class Decision(Record):
     recovery_action: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    input_estimate: int | None = None
+    provider_model: str | None = None
 
 
 class RunOutcome(Record):
@@ -202,6 +244,15 @@ class RunOutcome(Record):
     dependency_versions: dict[str, str]
     config: dict[str, Any]
     trace_file: str
+    artifact_version: str = "phase1"
+    experiment_kind: str = "development"
+    provider_error: str | None = None
+    uncertain: bool = False
+    recovery_actions: int = 0
+    actual_executions: int = 0
+    fault_rules_planned: int = 0
+    fault_rules_activated: int = 0
+    assertion_details: dict[str, Any] = Field(default_factory=dict)
 
 
 class MetricSummary(Record):
@@ -232,3 +283,19 @@ class MetricSummary(Record):
     input_tokens: int | None
     output_tokens: int | None
     dollar_cost: float | None = None
+    artifact_version: str = "phase1"
+    experiment_kind: str = "development"
+    faulted_runs: int = 0
+    activation_coverage: float | None = None
+    unsupported_claims: int = 0
+    provider_failures: int = 0
+    uncertain_runs: int = 0
+    recovery_actions: int = 0
+    actual_executions: int = 0
+    termination_reasons: dict[str, int] = Field(default_factory=dict)
+    completion_interval: list[float] = Field(default_factory=list)
+    agent_invalid_calls: int = 0
+    injected_invalid_calls: int = 0
+    fault_rules_planned: int = 0
+    fault_rules_activated: int = 0
+    rule_activation_coverage: float | None = None

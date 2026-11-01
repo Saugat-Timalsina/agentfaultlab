@@ -1,9 +1,10 @@
 scenarios: [all]
 policies: [fail_fast, bounded_retry, resilient]
 mode: scripted
+experiment_kind: scripted
 seed: 7
 repeats: 1
-output_dir: results/demo
+output_dir: results/offline-v2
 budgets:
   max_steps: 18
   max_tool_calls: 24

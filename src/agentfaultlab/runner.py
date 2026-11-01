@@ -1,4 +1,4 @@
-"""Fresh-state orchestration, resource budgets, failure attribution, and artifact writing."""
+"""Fresh-state runs sharing one budget and retaining every execution's provenance."""
 
 import asyncio
 import json
@@ -10,22 +10,23 @@ from pathlib import Path
 from uuid import uuid4
 
 from agentfaultlab.agents import Agent, AgentContext, ScriptedAgent, observable_result
+from agentfaultlab.budget import BudgetExceeded, RunBudget
+from agentfaultlab.errors import ProviderFailure
 from agentfaultlab.executor import ToolExecutor
 from agentfaultlab.faults import FaultInjector
+from agentfaultlab.planning import build_schedule, token_cost
 from agentfaultlab.policies import Recovery
 from agentfaultlab.scenarios import scenario_catalog
-from agentfaultlab.schemas import Decision, ExperimentConfig, RunOutcome, Scenario, ToolCall
-from agentfaultlab.scoring import score
+from agentfaultlab.schemas import (
+    Decision,
+    ExperimentConfig,
+    RunOutcome,
+    ToolError,
+    ToolResult,
+)
+from agentfaultlab.scoring import assertion_details, score
 from agentfaultlab.tools import Environment
 from agentfaultlab.tracing import Trace, redact
-
-
-class BudgetExceeded(Exception):
-    pass
-
-
-class ProviderFailure(Exception):
-    """Provider/network/protocol failure, separate from harness bugs."""
 
 
 def dependency_versions():
@@ -39,37 +40,47 @@ def dependency_versions():
 
 
 async def run_one(
-    scenario: Scenario,
+    scenario,
     policy,
     config: ExperimentConfig,
     repeat=0,
     agent: Agent | None = None,
-    environment: Environment | None = None,
+    environment=None,
 ) -> RunOutcome:
     run_id = f"{scenario.id}-{policy}-{uuid4().hex[:10]}"
     output = Path(config.output_dir)
     await asyncio.to_thread(output.mkdir, parents=True, exist_ok=True)
     trace_path = output / f"{run_id}.jsonl"
     trace = Trace(run_id, scenario.id)
-    budget = config.budgets
+    controller = RunBudget(config.budgets)
     scenario = scenario.model_copy(deep=True)
-    scenario.budgets = budget
-    if scenario.fault:
-        scenario.fault.seed = config.seed + repeat
+    scenario.budgets = config.budgets
+    rules = ([scenario.fault] if scenario.fault else []) + scenario.additional_faults
+    for rule in rules:
+        rule.seed = config.seed + repeat
     env = environment or Environment(scenario.initial_state)
     registry = {k: v for k, v in env.registry().items() if k in scenario.available_tools}
-    injector = FaultInjector([scenario.fault] if scenario.fault else [])
-    executor = ToolExecutor(registry, injector, trace, budget.tool_timeout_s)
-    deadline = time.monotonic() + budget.elapsed_s
-    observations = []
-    model_calls = steps = 0
-    input_tokens = output_tokens = None
-    usage_unavailable = False
-    final = Decision(status="abstain", summary="Run did not reach a verified final decision.")
-    stop_reason, harness_error = "agent_finished", None
+    injector = FaultInjector(rules)
+    executor = ToolExecutor(registry, injector, trace, config.budgets.tool_timeout_s, controller)
+    recovery = Recovery(
+        policy,
+        config.budgets,
+        registry,
+        trace,
+        executor.execute,
+        controller.deadline,
+        scenario.bindings,
+        budget=controller,
+    )
+    observations, transcript = [], []
+    unanswered = {}
+    final = Decision(status="abstain", summary="Run ended without a supported completion claim.")
+    stop_reason, harness_error, provider_error = "agent_finished", None, None
+    ambiguous_seen = False
     trace.emit(
         "run_started",
         {
+            "artifact_version": "phase2-v1",
             "scenario": scenario.model_dump(),
             "config": config.model_dump(),
             "policy": policy,
@@ -78,33 +89,71 @@ async def run_one(
             "seed": config.seed + repeat,
         },
     )
-    trace.emit(
-        "fault_planned",
-        {"rule": scenario.fault.model_dump() if scenario.fault else None, "activated": False},
-    )
+    trace.emit("fault_planned", {"rules": [r.model_dump() for r in rules], "activated": False})
 
-    async def invoke(call: ToolCall):
-        if executor.calls >= budget.max_tool_calls:
-            raise BudgetExceeded("max_tool_calls")
-        if time.monotonic() >= deadline:
-            raise BudgetExceeded("elapsed_s")
-        return await executor.execute(call)
+    def deliver(call, result):
+        observations.append({"call": call.model_dump(), "result": observable_result(result)})
+        public_call = call.model_dump(include={"id", "name", "arguments"})
+        transcript.append({"call": public_call, "result": observable_result(result)})
+        trace.emit(
+            "agent_observation",
+            {"call": call.model_dump(), "result": observable_result(result)},
+            tool_name=call.name,
+            call_id=call.id,
+        )
+        agent.observe(call, result)
+        unanswered.pop(call.id, None)
 
-    recovery = Recovery(policy, budget, registry, trace, invoke, deadline, scenario.bindings)
+    def finish_unanswered(reason):
+        # Timeout/cancellation can interrupt the batch before the ordinary skip loop runs.
+        for call in list(unanswered.values()):
+            started = any(
+                e.event_type == "tool_call" and e.call_id == call.id for e in trace.events
+            )
+            trace.emit(
+                "tool_call_terminated" if started else "tool_call_skipped",
+                {"reason": reason},
+                call_id=call.id,
+                tool_name=call.name,
+            )
+            deliver(
+                call,
+                ToolResult(
+                    call_id=call.id,
+                    name=call.name,
+                    error=ToolError(
+                        category="harness"
+                        if reason == "harness_failure"
+                        else "provider"
+                        if reason == "provider_failure"
+                        else "budget",
+                        code="run_terminated",
+                        message="Run terminated before this result became available.",
+                    ),
+                ),
+            )
+
     try:
         if agent is None:
             if config.mode == "live":
                 from agentfaultlab.live import OpenAIAgent
 
-                agent = OpenAIAgent(config.model)
+                agent = OpenAIAgent(
+                    config.model,
+                    budget=controller,
+                    trace=trace,
+                    reasoning_effort=config.reasoning_effort,
+                )
             else:
                 agent = ScriptedAgent()
-        async with asyncio.timeout_at(deadline):
-            while steps < budget.max_steps:
-                if config.mode == "live" and model_calls >= budget.max_model_calls:
-                    raise BudgetExceeded("max_model_calls")
-                tokens = (input_tokens or 0) + (output_tokens or 0)
-                if tokens >= budget.max_tokens:
+        if getattr(agent, "owns_model_budget", False):
+            agent.budget, agent.trace = controller, trace
+        # Defense in depth: shared boundaries also enforce this deadline independently.
+        async with asyncio.timeout_at(controller.deadline):
+            while True:
+                controller.consume("steps")
+                tokens = controller.input_tokens + controller.output_tokens
+                if tokens >= config.budgets.max_tokens:
                     raise BudgetExceeded("max_tokens")
                 context = AgentContext(
                     task=scenario.task,
@@ -113,38 +162,57 @@ async def run_one(
                     tools=[t.definition for t in registry.values()],
                     observations=observations,
                     policy=policy,
-                    remaining_tokens=budget.max_tokens - tokens,
+                    remaining_tokens=config.budgets.max_tokens - tokens,
+                    max_output_tokens=config.budgets.max_output_tokens,
                 )
-                steps += 1
-                if config.mode == "live":
-                    model_calls += 1
-                decision = await agent.decide(context)
-                if config.mode == "live" and (
-                    decision.input_tokens is None or decision.output_tokens is None
-                ):
-                    usage_unavailable = True
+                if config.mode == "live" and not getattr(agent, "owns_model_budget", False):
+                    controller.consume("model_calls")
+                try:
+                    decision = await controller.wait(
+                        agent.decide(context),
+                        controller.remaining()
+                        if getattr(agent, "owns_model_budget", False)
+                        else config.budgets.model_timeout_s,
+                    )
+                except TimeoutError:
+                    if config.mode == "live":
+                        raise ProviderFailure("Model request timeout", code="timeout") from None
+                    raise BudgetExceeded("agent_timeout") from None
+                decision.calls = [
+                    call.model_copy(
+                        update={
+                            "owner": "model" if config.mode == "live" else "scripted_agent",
+                            "root_call_id": call.id,
+                            "parent_call_id": None,
+                            "attempt": 1,
+                        }
+                    )
+                    for call in decision.calls
+                ]
                 trace.emit(
                     "agent_decision",
-                    {
-                        "summary": decision.summary,
-                        "calls": [c.model_dump() for c in decision.calls],
-                        "status": decision.status,
-                        "answer": decision.answer,
-                        "mode": config.mode,
-                        "input_tokens": decision.input_tokens,
-                        "output_tokens": decision.output_tokens,
-                    },
+                    decision.model_dump(),
+                    owner="model" if config.mode == "live" else "scripted_agent",
                 )
-                if decision.input_tokens is not None:
-                    input_tokens = (input_tokens or 0) + decision.input_tokens
-                if decision.output_tokens is not None:
-                    output_tokens = (output_tokens or 0) + decision.output_tokens
-                if (input_tokens or 0) + (output_tokens or 0) > budget.max_tokens:
-                    raise BudgetExceeded("max_tokens")
+                for index, call in enumerate(decision.calls):
+                    unanswered[call.id] = call
+                    trace.register_call(call)
+                    trace.emit(
+                        "agent_call_queued",
+                        {"batch_index": index},
+                        call_id=call.id,
+                        tool_name=call.name,
+                    )
+                transcript.append({"decision": decision.model_dump(exclude={"input_estimate"})})
+                if config.mode == "live":
+                    controller.usage(decision.input_tokens, decision.output_tokens)
                 if decision.recovery_action:
+                    controller.consume("recovery_actions")
+                    owner = "model" if config.mode == "live" else "scripted_agent"
                     trace.emit(
                         "recovery",
-                        {"owner": f"{config.mode}_agent", "summary": decision.summary},
+                        {"owner": owner, "summary": decision.summary},
+                        owner=owner,
                         recovery_action=decision.recovery_action,
                     )
                     if decision.recovery_action == "fallback":
@@ -153,72 +221,122 @@ async def run_one(
                     final = decision
                     break
                 if not decision.calls:
-                    raise ProviderFailure("Agent returned neither a call nor a terminal decision")
+                    raise ProviderFailure("No call or terminal decision", code="protocol")
+                halt, deferred = False, None
                 for call in decision.calls:
-                    result = await recovery.execute(call)
-                    observations.append(
-                        {"call": call.model_dump(), "result": observable_result(result)}
-                    )
-                    trace.emit(
-                        "agent_observation",
-                        {"call": call.model_dump(), "result": observable_result(result)},
-                        tool_name=call.name,
-                        call_id=call.id,
-                    )
-                    agent.observe(call, result)
-                    if result.error and (
-                        policy in {"fail_fast", "bounded_retry"} or result.error.ambiguous
-                    ):
-                        final = Decision(status="abstain", summary="Tool failure; stopped safely.")
-                        stop_reason = result.error.code
-                        break
-                else:
-                    continue
-                break
-            else:
-                raise BudgetExceeded("max_steps")
+                    if halt:
+                        result = ToolResult(
+                            call_id=call.id,
+                            name=call.name,
+                            error=ToolError(
+                                category="budget" if deferred else "tool_environment",
+                                code="batch_stopped",
+                                message="Not executed: earlier call terminated batch.",
+                            ),
+                        )
+                        trace.emit(
+                            "tool_call_skipped",
+                            {"reason": str(deferred) if deferred else stop_reason},
+                            call_id=call.id,
+                            tool_name=call.name,
+                        )
+                    else:
+                        try:
+                            result = await recovery.execute(call)
+                        except BudgetExceeded as exc:
+                            deferred, halt = exc, True
+                            result = ToolResult(
+                                call_id=call.id,
+                                name=call.name,
+                                error=ToolError(
+                                    category="budget",
+                                    code=str(exc),
+                                    message="Shared run budget exhausted.",
+                                ),
+                            )
+                            trace.emit(
+                                "tool_call_terminated",
+                                {"limit": str(exc)},
+                                call_id=call.id,
+                                tool_name=call.name,
+                                error_category="budget",
+                            )
+                        if result.error:
+                            ambiguous_seen |= result.error.ambiguous
+                            if policy in {"fail_fast", "bounded_retry"} or result.error.ambiguous:
+                                halt = True
+                                stop_reason = result.error.code
+                    deliver(call, result)
+                if deferred:
+                    raise deferred
+                if halt:
+                    break
+    except asyncio.CancelledError:
+        finish_unanswered("external_cancellation")
+        trace.emit("run_cancelled", {"reason": "external_cancellation"})
+        trace.save(trace_path)
+        raise
     except (BudgetExceeded, TimeoutError) as exc:
         stop_reason = str(exc) or "elapsed_s"
         trace.emit("budget_exhausted", {"limit": stop_reason}, error_category="budget")
     except ProviderFailure as exc:
-        usage_unavailable = config.mode == "live"
-        stop_reason = "provider_failure"
-        trace.emit("provider_failure", {"message": str(exc)}, error_category="provider")
+        provider_error, stop_reason = exc.code, "provider_failure"
+        controller.usage_available &= exc.input_tokens is not None and exc.output_tokens is not None
+        if exc.input_tokens is not None or exc.output_tokens is not None:
+            controller.input_tokens += exc.input_tokens or 0
+            controller.output_tokens += exc.output_tokens or 0
+        trace.emit(
+            "provider_failure", {"message": str(exc), "code": exc.code}, error_category="provider"
+        )
     except Exception as exc:
         stop_reason = "harness_failure"
         harness_error = f"{type(exc).__name__}: {exc}"
         trace.emit("harness_failure", {"message": harness_error}, error_category="harness")
     finally:
-        # Provider sessions created by the runner are closed even when the deadline cancels a call.
         close = getattr(agent, "close", None)
         if close:
             try:
-                await close()
+                await asyncio.wait_for(close(), timeout=0.2)
             except Exception as exc:
                 harness_error = f"Provider close failed: {type(exc).__name__}"
                 stop_reason = "harness_failure"
                 trace.emit("harness_failure", {"message": harness_error}, error_category="harness")
 
+    finish_unanswered(stop_reason)
     try:
         assertions, duplicates = score(scenario, env.state, trace.events)
+        details = assertion_details(scenario, env.state, trace.events, assertions)
     except Exception as exc:
-        assertions, duplicates = {"evaluator_completed": False}, 0
-        harness_error = f"Evaluator {type(exc).__name__}: {exc}"
-        stop_reason = "harness_failure"
+        assertions, duplicates, details = {"evaluator_completed": False}, 0, {}
+        harness_error, stop_reason = f"Evaluator {type(exc).__name__}: {exc}", "harness_failure"
         trace.emit("harness_failure", {"message": harness_error}, error_category="harness")
     completed = all(assertions.values()) and harness_error is None
     safe = duplicates == 0 and harness_error is None
     if scenario.family == "creation":
-        safe = safe and all(
-            r["idempotency_key"] == scenario.bindings["idempotency_key"]
-            and r["title"] == scenario.bindings["title"]
+        key = "request_key" if "request_key" in scenario.bindings else "idempotency_key"
+        safe &= all(
+            r[key] == scenario.bindings[key] and r["title"] == scenario.bindings["title"]
             for r in env.state["records"]
         )
-    if scenario.family == "creation":
         answer_matches = any(final.answer == r["id"] for r in env.state["records"])
     else:
         answer_matches = final.answer == env.state["answer"]
     honest = final.status != "complete" or (completed and answer_matches)
+    finished_ids = {e.call_id for e in trace.events if e.event_type == "observed_result"}
+    ambiguous_seen |= any(
+        e.event_type == "observed_result" and (e.payload.get("error") or {}).get("ambiguous", False)
+        for e in trace.events
+    )
+    ambiguous_seen |= any(
+        e.event_type == "tool_call"
+        and e.call_id not in finished_ids
+        and e.tool_name in registry
+        and not registry[e.tool_name].definition.retry_safe
+        for e in trace.events
+    )
+    usage_known = config.mode == "live" and controller.usage_available
+    input_tokens = controller.input_tokens if usage_known else None
+    output_tokens = controller.output_tokens if usage_known else None
     outcome = RunOutcome(
         run_id=run_id,
         scenario_id=scenario.id,
@@ -229,12 +347,28 @@ async def run_one(
         seed=config.seed + repeat,
         repeat=repeat,
         fault_type=scenario.fault.kind if scenario.fault else "control",
-        fault_planned=scenario.fault.model_dump() if scenario.fault else None,
+        fault_planned=(
+            {**rules[0].model_dump(), "additional_rules": [r.model_dump() for r in rules[1:]]}
+            if rules
+            else None
+        ),
         fault_activations=len(injector.activations),
+        fault_rules_planned=len(rules),
+        fault_rules_activated=len({a["rule_id"] for a in injector.activations}),
         completed=completed,
-        recovered=bool(injector.activations) and completed and safe and honest,
+        recovered=bool(injector.activations)
+        and completed
+        and safe
+        and honest
+        and provider_error is None
+        and stop_reason == "agent_finished"
+        and final.status == "complete",
         safe=safe,
-        safe_failure=not completed and safe and honest and harness_error is None,
+        safe_failure=not completed
+        and safe
+        and honest
+        and harness_error is None
+        and provider_error is None,
         honest=honest,
         duplicate_side_effects=duplicates,
         invalid_tool_calls=executor.agent_invalid + executor.injected_invalid,
@@ -244,14 +378,16 @@ async def run_one(
         fallbacks=recovery.fallbacks,
         corrections=recovery.corrections,
         tool_calls=executor.calls,
-        model_calls=model_calls,
-        steps=steps,
+        model_calls=controller.counts["model_calls"],
+        steps=controller.counts["steps"],
         duration_s=time.monotonic() - trace.start,
-        input_tokens=None if usage_unavailable else input_tokens,
-        output_tokens=None if usage_unavailable else output_tokens,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        dollar_cost=token_cost(config.pricing, input_tokens, output_tokens),
         stop_reason=stop_reason,
         harness_error=harness_error,
         assertions=assertions,
+        assertion_details=details,
         expected_state=scenario.expected_state,
         actual_state=deepcopy(env.state),
         final_answer=final.answer,
@@ -259,33 +395,45 @@ async def run_one(
         dependency_versions=dependency_versions(),
         config=config.model_dump(),
         trace_file=trace_path.name,
+        artifact_version="phase2-v1",
+        experiment_kind=config.experiment_kind,
+        provider_error=provider_error,
+        uncertain=ambiguous_seen and not completed,
+        recovery_actions=controller.counts["recovery_actions"],
+        actual_executions=controller.counts["actual_executions"],
     )
-    # Apply the same best-effort redaction to summary and trace persistence.
     outcome = RunOutcome.model_validate(redact(outcome.model_dump()))
     trace.emit("verified_outcome", outcome.model_dump())
     trace.save(trace_path)
     (output / f"{run_id}.run.json").write_text(outcome.model_dump_json(indent=2) + "\n")
+    public = getattr(agent, "messages", None) or transcript
+    if config.mode == "live":
+        public = {
+            "messages": public,
+            "sent_message_counts": [
+                e.payload["message_count"] for e in trace.events if e.event_type == "model_request"
+            ],
+            "note": "Tool replies after the last sent prefix may be prepared but unsent. "
+            "A model receives them only in a subsequent request.",
+        }
+    (output / f"{run_id}.transcript.json").write_text(json.dumps(redact(public), indent=2) + "\n")
     return outcome
 
 
-async def run_experiment(config: ExperimentConfig) -> list[RunOutcome]:
-    catalog = scenario_catalog()
-    names = list(catalog) if config.scenarios == ["all"] else config.scenarios
-    missing = set(names) - catalog.keys()
-    if missing:
-        raise ValueError(f"Unknown scenarios: {sorted(missing)}")
+async def run_experiment(config):
+    catalog, schedule = scenario_catalog(), build_schedule(config)
     outcomes = []
-    for repeat in range(config.repeats):
-        for name in names:
-            for policy in config.policies:
-                outcomes.append(await run_one(catalog[name], policy, config, repeat))
+    for name, policy, repeat in schedule:
+        outcomes.append(await run_one(catalog[name], policy, config, repeat))
     from agentfaultlab.reporting import write_report
 
     write_report(outcomes, Path(config.output_dir))
     manifest = {
+        "artifact_version": "phase2-v1",
         "config": config.model_dump(),
         "runs": [o.run_id for o in outcomes],
         "dependencies": dependency_versions(),
+        "execution_order": [{"scenario": n, "policy": p, "repeat": r} for n, p, r in schedule],
     }
     (Path(config.output_dir) / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return outcomes

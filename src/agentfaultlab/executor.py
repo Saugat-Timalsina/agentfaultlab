@@ -5,18 +5,25 @@ import time
 
 from pydantic import ValidationError
 
+from agentfaultlab.budget import RunBudget
 from agentfaultlab.faults import FaultInjector
-from agentfaultlab.schemas import ToolCall, ToolError, ToolResult
+from agentfaultlab.schemas import Budgets, ToolCall, ToolError, ToolResult
 from agentfaultlab.tools import DomainError, Tool, ToolUnavailable
 from agentfaultlab.tracing import Trace
 
 
 class ToolExecutor:
     def __init__(
-        self, registry: dict[str, Tool], injector: FaultInjector, trace: Trace, timeout_s: float
+        self,
+        registry: dict[str, Tool],
+        injector: FaultInjector,
+        trace: Trace,
+        timeout_s: float,
+        budget: RunBudget | None = None,
     ):
         self.registry, self.injector, self.trace = registry, injector, trace
         self.timeout_s = timeout_s
+        self.budget = budget or RunBudget(Budgets(tool_timeout_s=timeout_s))
         self.calls = 0
         self.agent_invalid = 0
         self.injected_invalid = 0
@@ -37,6 +44,8 @@ class ToolExecutor:
         return parsed.model_dump(), None, None
 
     async def execute(self, call: ToolCall) -> ToolResult:
+        self.budget.consume("tool_calls")
+        self.trace.register_call(call)
         self.calls += 1
         occurrence = self.injector.observe(call.name)
         started = time.monotonic()
@@ -67,6 +76,8 @@ class ToolExecutor:
 
         args, code, message = self.validate(call)
         if code:
+            if call.owner == "middleware":
+                raise RuntimeError(f"Recovery recipe produced an invalid call: {code}")
             self.agent_invalid += 1
             return finish(
                 error=ToolError(category="agent_invalid_call", code=code, message=message)
@@ -115,27 +126,40 @@ class ToolExecutor:
                 )
 
         tool = self.registry[effective.name]
+        before = tool.state_probe() if tool.state_probe else None
 
         async def invoke():
             if rule and rule.kind == "exception":
                 raise ToolUnavailable("Synthetic temporary service outage")
             if rule and rule.kind == "timeout":
                 await asyncio.sleep(self.timeout_s * 4 + 0.05)
+            self.budget.check()
+            self.budget.counts["actual_executions"] += 1
             data = await tool.handler(**args)
-            if rule and rule.kind == "commit_timeout":
-                self.injector.activations.append(activation)
-                self.trace.emit("fault_activated", activation, tool_name=call.name, call_id=call.id)
+            if tool.state_probe:
+                after = tool.state_probe()
+                changed = before != after
                 self.trace.emit(
-                    "environment_commit",
-                    {"response_lost": True},
+                    "write_state_checked",
+                    {"before": before, "after": after, "state_changed": changed},
                     tool_name=call.name,
                     call_id=call.id,
                 )
+                if changed:
+                    self.trace.emit(
+                        "environment_commit",
+                        {"verified_state_change": True, "before": before, "after": after},
+                        tool_name=call.name,
+                        call_id=call.id,
+                    )
+            if rule and rule.kind == "commit_timeout":
+                self.injector.activations.append(activation)
+                self.trace.emit("fault_activated", activation, tool_name=call.name, call_id=call.id)
                 await asyncio.sleep(self.timeout_s * 4 + 0.05)
             return data
 
         try:
-            data = await asyncio.wait_for(invoke(), timeout=self.timeout_s)
+            data = await self.budget.wait(invoke(), self.timeout_s)
         except TimeoutError:
             return finish(
                 error=ToolError(

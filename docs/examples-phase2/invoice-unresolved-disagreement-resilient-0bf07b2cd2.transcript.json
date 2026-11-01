@@ -1,0 +1,55 @@
+[
+  {
+    "decision": {
+      "calls": [
+        {
+          "id": "1d8c79e130c54a95b1a1256ee5c59e9f",
+          "name": "get_invoice_primary",
+          "arguments": {},
+          "root_call_id": "1d8c79e130c54a95b1a1256ee5c59e9f",
+          "parent_call_id": null,
+          "attempt": 1,
+          "owner": "scripted_agent"
+        }
+      ],
+      "answer": null,
+      "status": "continue",
+      "summary": "Scripted next action: get_invoice_primary",
+      "recovery_action": null,
+      "input_tokens": null,
+      "output_tokens": null,
+      "provider_model": null
+    }
+  },
+  {
+    "call": {
+      "id": "1d8c79e130c54a95b1a1256ee5c59e9f",
+      "name": "get_invoice_primary",
+      "arguments": {}
+    },
+    "result": {
+      "call_id": "1d8c79e130c54a95b1a1256ee5c59e9f",
+      "name": "get_invoice_primary",
+      "data": null,
+      "error": {
+        "code": "unresolved_disagreement",
+        "message": "Independent peer sources disagree; abstain without authority.",
+        "transient": false,
+        "ambiguous": false,
+        "retry_after": null
+      }
+    }
+  },
+  {
+    "decision": {
+      "calls": [],
+      "answer": null,
+      "status": "abstain",
+      "summary": "Available recovery actions exhausted; task remains unverified.",
+      "recovery_action": null,
+      "input_tokens": null,
+      "output_tokens": null,
+      "provider_model": null
+    }
+  }
+]

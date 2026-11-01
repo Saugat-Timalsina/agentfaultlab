@@ -4,7 +4,7 @@ import csv
 import io
 import json
 import statistics
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from agentfaultlab.schemas import MetricSummary, RunOutcome
@@ -25,15 +25,22 @@ def load_results(directory: Path) -> list[RunOutcome]:
 def summarize(outcomes: list[RunOutcome]) -> list[MetricSummary]:
     groups = defaultdict(list)
     for run in outcomes:
-        groups[(run.policy, run.mode, run.model)].append(run)
+        groups[(run.policy, run.mode, run.model, run.artifact_version, run.experiment_kind)].append(
+            run
+        )
     summaries = []
-    for (policy, mode, model), runs in sorted(groups.items(), key=lambda item: str(item[0])):
+    for (policy, mode, model, artifact_version, kind), runs in sorted(
+        groups.items(), key=lambda item: str(item[0])
+    ):
         n = len(runs)
         completed = sum(r.completed for r in runs)
         activated = sum(r.fault_activations > 0 for r in runs)
         recovered = sum(r.recovered for r in runs)
         failed = n - completed
         safe_failures = sum(r.safe_failure for r in runs)
+        faulted = sum(r.fault_planned is not None for r in runs)
+        planned_rules = sum(r.fault_rules_planned or int(r.fault_planned is not None) for r in runs)
+        active_rules = sum(r.fault_rules_activated or int(r.fault_activations > 0) for r in runs)
         # Variability across repeat-level suite rates, not across heterogeneous scenarios.
         repeats = defaultdict(list)
         for r in runs:
@@ -73,9 +80,39 @@ def summarize(outcomes: list[RunOutcome]) -> list[MetricSummary]:
                 completion_standard_error=sd / len(rates) ** 0.5 if sd is not None else None,
                 input_tokens=available_sum("input_tokens"),
                 output_tokens=available_sum("output_tokens"),
+                dollar_cost=available_sum("dollar_cost"),
+                artifact_version=artifact_version,
+                experiment_kind=kind,
+                faulted_runs=faulted,
+                activation_coverage=activated / faulted if faulted else None,
+                unsupported_claims=sum(
+                    not r.honest and r.harness_error is None and r.provider_error is None
+                    for r in runs
+                ),
+                provider_failures=sum(r.provider_error is not None for r in runs),
+                uncertain_runs=sum(r.uncertain for r in runs),
+                recovery_actions=sum(r.recovery_actions for r in runs),
+                actual_executions=sum(r.actual_executions for r in runs),
+                termination_reasons=dict(Counter(r.stop_reason for r in runs)),
+                completion_interval=wilson_interval(completed, n),
+                agent_invalid_calls=sum(r.agent_invalid_calls for r in runs),
+                injected_invalid_calls=sum(r.injected_invalid_calls for r in runs),
+                fault_rules_planned=planned_rules,
+                fault_rules_activated=active_rules,
+                rule_activation_coverage=active_rules / planned_rules if planned_rules else None,
             )
         )
     return summaries
+
+
+def wilson_interval(successes, total):
+    if not total:
+        return []
+    z, p = 1.96, successes / total
+    denominator = 1 + z * z / total
+    center = (p + z * z / (2 * total)) / denominator
+    half = z * ((p * (1 - p) + z * z / (4 * total)) / total) ** 0.5 / denominator
+    return [max(0, center - half), min(1, center + half)]
 
 
 def csv_text(records: list[dict]) -> str:

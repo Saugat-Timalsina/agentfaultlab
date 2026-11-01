@@ -21,6 +21,7 @@ class AgentContext:
     observations: list[dict[str, Any]]
     policy: PolicyName
     remaining_tokens: int
+    max_output_tokens: int = 1024
 
 
 class Agent(Protocol):
@@ -75,6 +76,32 @@ class ScriptedAgent:
                 return decision
             return Decision(status="complete", answer=value, summary="Scripted sources checked.")
         if context.family == "calculation":
+            if "get_invoice_primary" in {t.name for t in context.tools}:
+                primary, reference = (
+                    successes("get_invoice_primary"),
+                    successes("get_invoice_reference"),
+                )
+                if not primary:
+                    return call("get_invoice_primary")
+                if not reference:
+                    return call("get_invoice_reference")
+                observed = primary[-1]
+                if observed["items"] != reference[-1]["items"]:
+                    if reference[-1]["authority"] != "vetted":
+                        return abstain("Peer sources disagree; evidence cannot resolve the value.")
+                    observed = reference[-1]
+                if not successes("calculate"):
+                    return call("calculate", items=observed["items"])
+                value = successes("calculate")[-1]["total"]
+                if value != sum(i["unit_price"] * i["quantity"] for i in observed["items"]):
+                    return abstain("Arithmetic check failed.")
+                if not successes("submit_answer"):
+                    return call("submit_answer", answer=value)
+                return Decision(
+                    status="complete",
+                    answer=value,
+                    summary="Independent invoice evidence and arithmetic checked.",
+                )
             items = successes("get_items")
             if not items:
                 return call("get_items")
@@ -91,12 +118,17 @@ class ScriptedAgent:
                 answer=verified,
                 summary="Scripted arithmetic checked against observed items.",
             )
-        created = successes("create_ticket")
+        create_tool = context.bindings.get("create_tool", "create_ticket")
+        find_tool = context.bindings.get("find_tool", "find_ticket")
+        key = "request_key" if "request_key" in context.bindings else "idempotency_key"
+        created = successes(create_tool)
         if not created:
-            return call("create_ticket", **context.bindings)
-        found = successes("find_ticket")
+            return call(
+                create_tool, title=context.bindings["title"], **{key: context.bindings[key]}
+            )
+        found = successes(find_tool)
         if not found:
-            return call("find_ticket", idempotency_key=context.bindings["idempotency_key"])
+            return call(find_tool, **{key: context.bindings[key]})
         records = found[-1]["records"]
         if len(records) != 1 or records[0]["title"] != context.bindings["title"]:
             return abstain("Record verification did not find exactly one matching ticket.")

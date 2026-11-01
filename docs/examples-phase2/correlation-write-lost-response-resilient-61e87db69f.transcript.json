@@ -1,0 +1,108 @@
+[
+  {
+    "decision": {
+      "calls": [
+        {
+          "id": "ff046313b58c459eadb9fe90a1092910",
+          "name": "create_correlation_ticket",
+          "arguments": {
+            "title": "Investigate sensor",
+            "request_key": "request-001"
+          },
+          "root_call_id": "ff046313b58c459eadb9fe90a1092910",
+          "parent_call_id": null,
+          "attempt": 1,
+          "owner": "scripted_agent"
+        }
+      ],
+      "answer": null,
+      "status": "continue",
+      "summary": "Scripted next action: create_correlation_ticket",
+      "recovery_action": null,
+      "input_tokens": null,
+      "output_tokens": null,
+      "provider_model": null
+    }
+  },
+  {
+    "call": {
+      "id": "ff046313b58c459eadb9fe90a1092910",
+      "name": "create_correlation_ticket",
+      "arguments": {
+        "title": "Investigate sensor",
+        "request_key": "request-001"
+      }
+    },
+    "result": {
+      "call_id": "ff046313b58c459eadb9fe90a1092910",
+      "name": "create_correlation_ticket",
+      "data": {
+        "title": "Investigate sensor",
+        "request_key": "request-001",
+        "id": "T-1",
+        "service": "correlation"
+      },
+      "error": null
+    }
+  },
+  {
+    "decision": {
+      "calls": [
+        {
+          "id": "14a5645695b9494ebe3b81e59d19b9df",
+          "name": "find_correlation_ticket",
+          "arguments": {
+            "request_key": "request-001"
+          },
+          "root_call_id": "14a5645695b9494ebe3b81e59d19b9df",
+          "parent_call_id": null,
+          "attempt": 1,
+          "owner": "scripted_agent"
+        }
+      ],
+      "answer": null,
+      "status": "continue",
+      "summary": "Scripted next action: find_correlation_ticket",
+      "recovery_action": null,
+      "input_tokens": null,
+      "output_tokens": null,
+      "provider_model": null
+    }
+  },
+  {
+    "call": {
+      "id": "14a5645695b9494ebe3b81e59d19b9df",
+      "name": "find_correlation_ticket",
+      "arguments": {
+        "request_key": "request-001"
+      }
+    },
+    "result": {
+      "call_id": "14a5645695b9494ebe3b81e59d19b9df",
+      "name": "find_correlation_ticket",
+      "data": {
+        "records": [
+          {
+            "title": "Investigate sensor",
+            "request_key": "request-001",
+            "id": "T-1",
+            "service": "correlation"
+          }
+        ]
+      },
+      "error": null
+    }
+  },
+  {
+    "decision": {
+      "calls": [],
+      "answer": "T-1",
+      "status": "complete",
+      "summary": "Scripted ticket existence verified.",
+      "recovery_action": null,
+      "input_tokens": null,
+      "output_tokens": null,
+      "provider_model": null
+    }
+  }
+]

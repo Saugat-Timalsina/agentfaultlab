@@ -1,3 +1,7 @@
+> **Phase 2 update:** Read the [new walkthrough](phase2-learning.md) for shared budgets,
+> recovery lineage, explicit write services and independent invoices. The snapshots and counts
+> below are preserved **Phase 1 scripted results**, not regenerated Phase 2 or live results.
+
 # Learning guide: follow the evidence
 
 These examples are saved artifacts from an actual **scripted offline** demo. They are not

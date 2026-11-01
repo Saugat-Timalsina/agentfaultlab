@@ -1,0 +1,49 @@
+# Phase 2 audit — phase2-v1
+
+Audited the executor, policies, runner, scoring, live adapter and dashboard from local commit
+`367d653` before implementing these changes. No applicable AGENTS.md exists in this repository
+or its ancestor directories. Existing source, tests and saved Phase 1 artifacts were preserved.
+
+| Concern | Finding in Phase 1 | Phase 2 response |
+| --- | --- | --- |
+| Run deadline misses recovery | **Already covered in runner:** its outer asyncio deadline surrounded retries, correction, fallback and reconciliation. It was inaccurate to claim every runner recovery path could overrun simply because it lacked a local check. **Gap:** direct executor/policy use did not share that protection. | `RunBudget` is shared by runner, executor and recovery. All awaited operations use remaining allowance; outer run timeout remains defense in depth. |
+| Tool timeout can exceed remaining time | **Confirmed local-boundary gap.** Executor passed the full configured tool timeout to wait_for. The outer runner normally cancelled it sooner. | Every tool wait uses min(tool timeout, remaining run time). Deadline exhaustion raises a named budget termination; cancellation is not converted into a transient tool error. |
+| Recovery budgets | **Partly already handled:** every runner middleware tool call used the counted invoke wrapper, and retries/corrections were locally capped. **Limitation:** recovery actions had no shared count and direct use bypassed global limits. | Shared run counters cover steps, actual model requests, boundary attempts, handler executions and recovery actions. Per-original-call retry/correction caps remain. |
+| Recovery loses provenance | **Confirmed defect.** Retry/fallback results were rewritten to original IDs/names; reconciliation synthesized success without an explicit returned-result event. Actual child calls appeared individually but lacked lineage. | Root/parent IDs, attempt number and execution owner; `middleware_result` records synthesis, reason and supporting call IDs. Native IDs remain unchanged in the model transcript. |
+| Commit inferred from handler return | **Confirmed defect.** `environment_commit` was emitted after return regardless of actual store mutation. | Fake write tools expose a diagnostic-only state probe. Before/after state is compared, `write_state_checked` records evidence, and `environment_commit` requires an actual change. A no-op handler produces no commit event. |
+| Hard-coded domain recovery | **Confirmed extensibility limitation.** Policies branched on lookup/create tool names and public bindings. They did not use evaluator truth. | Small explicit `Recipe` registry holds correction fields, fallback targets, reconciliation contracts and independent-source checks. Policy scheduling/budgets are generic; registry tests exercise a renamed tool. |
+| Misnamed idempotency key | **Confirmed terminology problem.** A field called idempotency_key could be used against a service that did not enforce it. | Explicit `correlation` and `idempotent` service tools use neutral `request_key`. The first permits duplicates; the second deduplicates equivalent requests and rejects conflicting content. Legacy names remain for compatibility and are labeled historical. |
+| Chart truncation | **Confirmed missing guarantee**, not a reproduced pixel-level defect: st.bar_chart supplied no fixed percentage domain. No original screenshot was available to establish exactly which bars appeared clipped. | Two separate Altair charts, each with an explicit 0–100% domain, readable configuration labels and no stacking. Tests inspect the serialized chart scale. No bar is fabricated for an unavailable recovery denominator. |
+| Pilot fairness | **Confirmed confound.** Live system prompt named the current policy and singled out resilient behavior. | Identical live system/task/tool payloads across policies; controlled HTTP test compares initial requests exactly. Only middleware changes. Historical scripted lookup behavior remains a declared fixture strategy. |
+| Multiple native calls | **Adapter already parsed multiple calls. Runner gap:** early termination could leave later calls silently unprocessed. | Execute sequentially in returned array order. If policy/budget stops the batch, each remaining call gets an explicit skipped result and trace event; no next model request is made with unanswered IDs. |
+| Truncation | **Confirmed defect.** Calls were handled before the finish-reason length check. | Reject all truncated responses before executing partial tool calls; retain available usage and classify provider truncation separately. |
+| Provider vs harness attribution | **Confirmed weakness.** Broad adapter exception handling could turn programming bugs into provider failures. | Catch expected SDK API errors and assign authentication/rate-limit/timeout/connection/service subtypes. Unexpected Python errors reach the harness boundary. |
+| Independent evidence | **Known limitation**, not a schema validator bug: old invoice data corruption passed arithmetic checks against the same bad data. | Preserve that failure case; add separately stored, separately targeted invoice sources with provenance, declared authority and supported abstention on unresolved disagreement. |
+
+## Explicit boundaries
+
+No recipe receives scenario IDs, hidden faults, expected state or environment state. Public
+bindings are task inputs only. Store snapshots and injector metadata exist only in diagnostic
+traces. A separate `.transcript.json` records model-visible messages (or scripted observable
+history). The final diagnostic event includes state assertions, as intended for local evaluation.
+
+No ambiguous write is automatically repeated, including the idempotent variant. The declared
+policy is conservative: one matching verified record resolves success; zero, multiple,
+conflicting or unavailable records leave the outcome uncertain. This is a choice rather than
+an unimplemented implicit retry promise.
+
+The deadline covers agent/tool/recovery work, not final scoring/serialization. Client close is
+separately capped at 0.2 seconds. Python cancellation is cooperative; hostile blocking handlers
+still need process isolation. Source authority is a synthetic declared contract, not cryptographic
+provenance. Correlated source corruption remains undetectable by agreement alone.
+
+## API/documentation review
+
+Checked official [Chat Completions request/finish semantics](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
+and [GPT-5.6 Terra capabilities and pricing](https://developers.openai.com/api/docs/models/gpt-5.6-terra)
+on 2026-11-01. The prepared model supports Chat Completions, function calls, structured outputs
+and reasoning effort `none`. Configured pricing is an explicit dated assumption, not an
+unsourced promise of future rates or account availability. SDK automatic retries are disabled.
+
+Observed checks and actual commands are recorded in [Phase 2 verification](phase2-verification.md).
+No paid requests or live results were produced.

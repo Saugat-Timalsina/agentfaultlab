@@ -3,11 +3,56 @@
 import json
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
 from agentfaultlab.reporting import csv_text, load_results, summarize
 from agentfaultlab.tracing import load_trace
+
+POLICY_LABELS = {
+    "fail_fast": "Fail fast",
+    "bounded_retry": "Bounded retry",
+    "resilient": "Resilient",
+}
+
+
+def percentage_chart(summaries, metric):
+    title = {
+        "completion_rate": "Completed / all selected runs (%)",
+        "recovery_rate": "Recovered / activated fault runs (%)",
+    }[metric]
+    data = []
+    for summary in summaries:
+        value = getattr(summary, metric)
+        if value is not None:
+            data.append(
+                {
+                    "configuration": f"{POLICY_LABELS[summary.policy]} · {summary.mode} · "
+                    f"{summary.experiment_kind} · {summary.artifact_version} · "
+                    f"{summary.model or 'script'}",
+                    "percentage": value * 100,
+                }
+            )
+    return (
+        alt.Chart(pd.DataFrame(data, columns=["configuration", "percentage"]))
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "configuration:N",
+                title="Agent + middleware",
+                axis=alt.Axis(labelAngle=-15, labelLimit=500),
+            ),
+            y=alt.Y(
+                "percentage:Q",
+                title=title,
+                scale=alt.Scale(domain=[0, 100], nice=False, clamp=False),
+                axis=alt.Axis(values=[0, 25, 50, 75, 100]),
+            ),
+            tooltip=["configuration:N", alt.Tooltip("percentage:Q", format=".1f")],
+        )
+        .properties(height=280, title=title)
+    )
 
 
 def main():
@@ -28,11 +73,24 @@ def main():
         st.info("No saved runs found. Run `agentfaultlab demo` in the terminal first.")
         return
     selected = outcomes
+    if st.session_state.get("_filter_directory") != str(directory):
+        for field in (
+            "scenario_id",
+            "policy",
+            "mode",
+            "fault_type",
+            "artifact_version",
+            "experiment_kind",
+        ):
+            st.session_state.pop(field, None)
+        st.session_state["_filter_directory"] = str(directory)
     for label, field in [
         ("Scenario", "scenario_id"),
         ("Policy", "policy"),
         ("Mode", "mode"),
         ("Fault type", "fault_type"),
+        ("Artifact version", "artifact_version"),
+        ("Experiment kind", "experiment_kind"),
     ]:
         options = sorted({getattr(r, field) for r in outcomes})
         values = st.sidebar.multiselect(label, options, default=options, key=field)
@@ -45,6 +103,19 @@ def main():
         st.info("No runs match these filters.")
         return
     summaries = summarize(selected)
+    if len(selected) < 15 or any(s.runs < 5 for s in summaries):
+        st.warning(
+            "Too little evidence for a stable comparison. Small filtered samples do not "
+            "support rankings or broad robustness claims."
+        )
+    st.subheader("Outcome summary")
+    st.write(
+        f"{sum(r.completed for r in selected)}/{len(selected)} completed; "
+        f"{sum(r.fault_activations > 0 for r in selected)}/"
+        f"{sum(r.fault_planned is not None for r in selected)} faulted runs activated; "
+        f"{sum(not r.honest for r in selected)} unsupported success claims; "
+        f"{sum(r.uncertain for r in selected)} uncertain outcomes."
+    )
     st.subheader("Policy comparison")
     st.caption(
         f"{len(selected)} saved runs. Recovery uses activated fault runs only. "
@@ -57,6 +128,19 @@ def main():
                 "policy": s.policy,
                 "mode": s.mode,
                 "model": s.model or "N/A",
+                "artifact version": s.artifact_version,
+                "experiment kind": s.experiment_kind,
+                "activated / faulted": f"{s.activated_runs}/{s.faulted_runs}",
+                "activated rules / planned rules": (
+                    f"{s.fault_rules_activated}/{s.fault_rules_planned}"
+                ),
+                "activation coverage %": s.activation_coverage * 100
+                if s.activation_coverage is not None
+                else None,
+                "unsupported claims": s.unsupported_claims,
+                "provider errors": s.provider_failures,
+                "uncertain runs": s.uncertain_runs,
+                "completion 95% interval": str([round(100 * x, 1) for x in s.completion_interval]),
                 "completed / runs": f"{s.completed}/{s.runs}",
                 "completion %": 100 * s.completion_rate,
                 "recovered / activated": f"{s.recovered}/{s.activated_runs}",
@@ -69,6 +153,8 @@ def main():
                 "honest runs": s.honest_runs,
                 "duplicates": s.duplicate_side_effects,
                 "invalid calls": s.invalid_tool_calls,
+                "agent invalid calls": s.agent_invalid_calls,
+                "injected invalid calls": s.injected_invalid_calls,
                 "retries": s.retries,
                 "fallbacks": s.fallbacks,
                 "tool calls": s.tool_calls,
@@ -83,18 +169,13 @@ def main():
         ]
     )
     st.dataframe(table, hide_index=True)
-    chart = pd.DataFrame(
-        [
-            {
-                "policy / mode / model": f"{s.policy} / {s.mode} / {s.model or 'script'}",
-                "completion": s.completion_rate,
-                "recovery": s.recovery_rate,
-            }
-            for s in summaries
-        ]
-    ).set_index("policy / mode / model")
-    st.bar_chart(chart, stack=False)
-    st.caption("Bars are proportions from 0 to 1. Missing recovery means no activated faults.")
+    st.altair_chart(percentage_chart(summaries, "completion_rate"))
+    st.altair_chart(percentage_chart(summaries, "recovery_rate"))
+    st.caption(
+        "Separate denominators; axes fixed at 0–100%. Missing recovery bars mean no "
+        "activated faults. Completion Wilson intervals are descriptive, not a ranking."
+    )
+    st.write({s.policy + " / " + s.experiment_kind: s.termination_reasons for s in summaries})
     st.download_button(
         "Export filtered comparison CSV", csv_text(records), "comparison.csv", mime="text/csv"
     )
@@ -124,7 +205,19 @@ def main():
         st.warning("Failed assertions: " + ", ".join(failures))
     st.dataframe(
         pd.DataFrame(
-            [{"assertion": name, "passed": passed} for name, passed in run.assertions.items()]
+            [
+                {
+                    "assertion": name,
+                    "passed": passed,
+                    "expected": json.dumps(
+                        run.assertion_details.get(name, {}).get("expected", "legacy")
+                    ),
+                    "observed": json.dumps(
+                        run.assertion_details.get(name, {}).get("observed", "legacy")
+                    ),
+                }
+                for name, passed in run.assertions.items()
+            ]
         ),
         hide_index=True,
     )
@@ -135,11 +228,37 @@ def main():
     except (OSError, ValueError) as exc:
         st.error(f"Trace unavailable: {exc}")
         return
+    focus = st.checkbox("Focus on faults and recovery", value=True)
+    displayed = [
+        e
+        for e in events
+        if not focus
+        or e.event_type
+        in {
+            "agent_decision",
+            "tool_call",
+            "fault_activated",
+            "environment_commit",
+            "observed_result",
+            "recovery",
+            "middleware_result",
+            "reconciliation_unresolved",
+            "agent_observation",
+            "tool_call_skipped",
+            "budget_exhausted",
+            "provider_failure",
+            "verified_outcome",
+        }
+    ]
     st.dataframe(
         pd.DataFrame(
             [
                 {
                     "seq": e.seq,
+                    "owner": e.owner or "legacy / harness",
+                    "root call": e.root_call_id,
+                    "parent call": e.parent_call_id,
+                    "attempt": e.attempt,
                     "elapsed_s": e.elapsed_s,
                     "duration_s": e.duration_s,
                     "event": e.event_type,
@@ -148,13 +267,16 @@ def main():
                     "error": e.error_category,
                     "recovery": e.recovery_action,
                 }
-                for e in events
+                for e in displayed
             ]
         ),
         hide_index=True,
     )
     for event in events:
-        with st.expander(f"{event.seq:03d} · {event.event_type} · {event.tool_name or ''}"):
+        with st.expander(
+            f"{event.seq:03d} · {event.event_type} · {event.owner or 'harness'} · "
+            f"{event.tool_name or ''}"
+        ):
             st.json(event.model_dump())
     st.download_button(
         "Export selected trace JSONL",

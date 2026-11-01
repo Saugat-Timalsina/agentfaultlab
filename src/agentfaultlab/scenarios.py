@@ -69,4 +69,99 @@ def scenario_catalog() -> dict[str, Scenario]:
     add(calculation, "incorrect-data", "incorrect_data", "get_items")
     add(creation, "commit-timeout", "commit_timeout", "create_ticket")
     add(creation, "unavailable", "exception", "create_ticket", behavior="persistent")
+    catalog.update(phase2_scenarios())
     return catalog
+
+
+def phase2_scenarios() -> dict[str, Scenario]:
+    from copy import deepcopy
+
+    cases = {}
+    for service in ("correlation", "idempotent"):
+        scenario = Scenario(
+            id=f"{service}-write-lost-response",
+            family="creation",
+            suite_version="phase2-v1",
+            task=f"Use create_{service}_ticket to create exactly one ticket titled "
+            "'Investigate sensor' with request_key 'request-001'. Then verify existence "
+            f"using find_{service}_ticket. This is the {service} service. A correlation "
+            "key does not enforce deduplication; an idempotent service rejects conflicting "
+            "content for an existing key. After a response timeout reconcile state, and "
+            "abstain if state is absent, conflicting, duplicated or unavailable.",
+            initial_state={"records": [], "answer": None},
+            available_tools=[f"create_{service}_ticket", f"find_{service}_ticket"],
+            expected_state={
+                "record_count": 1,
+                "title": "Investigate sensor",
+                "request_key": "request-001",
+            },
+            bindings={
+                "title": "Investigate sensor",
+                "request_key": "request-001",
+                "create_tool": f"create_{service}_ticket",
+                "find_tool": f"find_{service}_ticket",
+            },
+            fault=FaultSpec(
+                id=f"{service}-lost", kind="commit_timeout", target_tool=f"create_{service}_ticket"
+            ),
+        )
+        cases[scenario.id] = scenario
+    base = cases["correlation-write-lost-response"]
+    for behavior in ("no-record", "multiple-records", "conflicting-content", "read-fails"):
+        variant = base.model_copy(deep=True)
+        variant.id = f"correlation-reconcile-{behavior}"
+        variant.initial_state["write_behavior"] = behavior
+        if behavior == "read-fails":
+            variant.additional_faults = [
+                FaultSpec(
+                    id="read-outage",
+                    kind="exception",
+                    target_tool="find_correlation_ticket",
+                    behavior="persistent",
+                )
+            ]
+        cases[variant.id] = variant
+
+    items = [{"unit_price": 1200, "quantity": 2}, {"unit_price": 350, "quantity": 3}]
+    invoice = Scenario(
+        id="invoice-sources-agree",
+        family="calculation",
+        suite_version="phase2-v1",
+        task="Retrieve get_invoice_primary and the separately stored get_invoice_reference. "
+        "Cross-check both before calculate and submit_answer. On disagreement select the "
+        "reference only if its observed authority is 'vetted'; if both are peers, abstain. "
+        "If either source is unavailable, abstain. Never infer authority from a value.",
+        initial_state={
+            "primary_invoice": deepcopy(items),
+            "reference_invoice": deepcopy(items),
+            "reference_authority": "vetted",
+            "answer": None,
+            "records": [],
+        },
+        available_tools=[
+            "get_invoice_primary",
+            "get_invoice_reference",
+            "calculate",
+            "submit_answer",
+        ],
+        expected_state={"answer": 3450},
+    )
+    cases[invoice.id] = invoice
+    for condition in ("primary-corrupted", "reference-unavailable", "unresolved-disagreement"):
+        variant = invoice.model_copy(deep=True)
+        variant.id = f"invoice-{condition}"
+        if condition == "reference-unavailable":
+            variant.fault = FaultSpec(
+                id="reference-down",
+                kind="exception",
+                target_tool="get_invoice_reference",
+                behavior="persistent",
+            )
+        else:
+            variant.fault = FaultSpec(
+                id="primary-corruption", kind="incorrect_data", target_tool="get_invoice_primary"
+            )
+            if condition == "unresolved-disagreement":
+                variant.initial_state["reference_authority"] = "peer"
+        cases[variant.id] = variant
+    return cases

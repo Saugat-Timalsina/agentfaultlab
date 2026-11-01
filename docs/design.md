@@ -1,132 +1,136 @@
-# Design
+# Architecture — Phase 2
 
-AgentFaultLab is a local experiment lab for injecting controlled tool faults, comparing
-recovery policies, and inspecting evidence-backed agent outcomes.
+The core is independent of Streamlit and any specific provider. Existing Phase 1 examples remain
+readable with defaulted new record fields; all newly generated artifacts are labeled phase2-v1.
+The original 15 scenarios remain the default suite. `configs/phase2/offline-v1.yaml` explicitly
+selects the expanded 25-scenario suite (75 policy runs).
 
-## Boundaries
+```text
+runner / shared RunBudget
+  → model or scripted decision → root agent calls
+  → Recovery scheduler → explicit Recipe registry
+  → ToolExecutor (every attempt) → validation → fault selection → handler → result validation
+  → middleware_result (if synthesized, links supporting child IDs)
+  → model-visible observation / transcript
+  → deterministic state and evidence assertions → JSONL / JSON / CSV
+  → read-only Streamlit playback
+```
 
-`schemas.py` defines validated serializable records for definitions, calls, results, errors,
-faults, budgets, scenarios, configuration, trace events, decisions, outcomes, and summaries.
-Configuration forbids unknown fields. Tool inputs/outputs also use strict validation:
-`"42"` cannot silently become an integer. The executor never repairs calls.
+## Budget ownership
 
-`tools.py` creates a fresh `Environment` with a deep copy of each scenario's initial state.
-Tools are async callables with Pydantic input/output models and a retry-safety contract.
-The registry exposes only the scenario's allowed tools. All attempts, including middleware
-retries, fallback reads, and reconciliation, pass through `ToolExecutor.execute`.
+`budget.py` owns the per-run deadline and counters for decisions, actual model requests, tool
+boundary attempts, started handlers, recovery actions and reported usage. Executor and recovery
+share the same instance, including standalone tests. Retry and correction counts are local to
+the original call; all their attempts/actions also consume shared run allowance. Check before
+operations and clamp waits to remaining time. Tool timeouts are ordinary observable environment
+errors only when the run deadline has not expired. A run deadline raises BudgetExceeded;
+CancelledError propagates without being converted to a retryable result. The runner's outer
+timeout is additional protection. Scoring/serialization is outside this orchestration deadline;
+provider cleanup is separately capped at 0.2 seconds. Cancellation remains cooperative.
 
-The executor records a call, validates its original name and arguments, selects a fault,
-revalidates injected mutations, executes or intercepts the call, validates its output, and
-records the observed result. Agent-invalid calls, injected-invalid calls, expected environment
-failures, output-validation errors, provider failures, and unexpected harness bugs have
-separate categories. Unexpected Python exceptions propagate to the runner's harness boundary;
-they are never mislabeled as bad model decisions. Scorer exceptions also become harness failures.
+The OpenAI adapter preflights an estimate of serialized UTF-8 request bytes + 512 framing tokens,
+then records an actual model request and sends max_completion_tokens bounded by configured
+output/remaining allowance. No additional request counts merely because a preflight failed.
+Reported usage is accounted before requested tools execute. Unavailable usage stays unavailable.
+This is a client safeguard, not exact tokenizer knowledge or an account billing cap.
 
-## Fault scheduling
+## Calls, results and evidence
 
-One occurrence is **one entry into the executor for the original tool name**. Invalid agent
-attempts count, but cannot activate a fault because original validation failed. Retry attempts
-count. Fallback and reconciliation reads count under their own original names. Mutated names
-do not move the counter. Counter state is fresh for each run.
+Every call has its own ID, root_call_id, parent_call_id, attempt number and owner (`model`,
+`scripted_agent`, `middleware`). A retry/correction/fallback/verification read is a distinct child
+call, retaining the original root. Attempt numbers indicate lineage depth; call ID and trace
+sequence are the unique identifiers, not a global chronological attempt index.
 
-`occurrence: 2` with transient behavior selects only attempt 2; persistent behavior selects
-attempt 2 and all subsequent attempts. Eligibility draws from a per-rule seeded RNG. A
-probability miss consumes that eligible occurrence; a transient fault is not postponed.
-The first matching activated rule wins; at most one fault applies to a call. The MVP scenario
-has one rule; `FaultInjector` can accept multiple rules with unique IDs. Experiment seed plus
-repeat index overrides each scenario rule's seed; the same repeat seed is shared across policies.
+ToolExecutor validates original inputs, counts the occurrence under the original name, selects
+eligible faults, revalidates mutations, executes/intercepts, validates outputs and traces them.
+Malformed agent calls are never silently repaired at the executor. Corrections are later explicit
+middleware calls using legitimate task bindings. Unexpected tool Python exceptions reach the
+harness boundary rather than masquerading as model mistakes or transient service errors.
 
-| Phase | Faults | Activation point |
-| --- | --- | --- |
-| Pre-execution | Unknown tool, missing/wrong argument, exception, timeout, rate limit | Before tool execution or intercept |
-| Post-execution | Commit followed by lost response | After handler returns and before cancellation during response delay |
-| Response corruption | Malformed result, plausible incorrect data | After handler returns, when output is actually changed |
+A returned recovery result uses the original native call ID so the model transcript remains
+valid. This is not allowed to erase provenance: a `middleware_result` diagnostic event records
+its supporting child IDs, observed source data and synthesis reason. The agent receives only
+the ordinary result/error, not hidden attribution categories, injector records or evaluator truth.
+The `.transcript.json` stores native conversation messages plus sent-prefix lengths;
+tool replies prepared after the last sent prefix have not been seen by the provider model.
+No observation is attributed as received until a subsequent request includes it. `.jsonl` stores diagnostic metadata,
+state probes and final assertions for the local viewer. No hidden chain-of-thought is requested.
 
-The trace distinguishes planned, selected, and activated faults. A selected corruption whose
-handler never returns has not activated. Activation records contain planned/actual tool and
-occurrence, phase, original/effective calls; corruption events show before/after results.
-Unreached or probability-skipped faults do not enter recovery denominators.
+Multiple native calls run sequentially in returned array order. After a policy/budget stop,
+remaining calls receive explicit skipped error replies and trace records; none are silently
+lost or executed outside the budget. The adapter refuses another request while call IDs lack
+replies. Truncated provider output is rejected before partial calls execute. SDK retries are
+zero. Expected SDK failures receive provider subtypes; unexpected adapter Python defects are
+harness errors. Live system/task/tool requests are identical across policies before observations.
 
-Injection metadata and expected state are evaluator-only. `AgentContext` exposes task text,
-public bindings, schemas, and public observations, not scenario IDs, initial truth, fault
-rules, activations, or evaluator assertions. `observable_result` strips internal attribution
-categories. Ordinary observable error codes, Retry-After, and write ambiguity remain visible.
-Trace viewers can see injector metadata; the agent cannot.
+## Small recovery registry
 
-## Policy and model ownership
+`recipes.py` contains explicit Recipe entries: public correction fields, fallback tool,
+verification tool/key/content fields and independent-source target. `policies.py` owns generic
+bounded retry/backoff/validation feedback, dispatch and accounting. Recipes receive calls,
+observed results and public task inputs only. They cannot inspect scenario IDs, expected answers,
+fault rules or environment state. Registering a renamed tool requires a recipe entry, not editing
+the scheduler. This is intentionally a small domain library rather than a plugin ecosystem.
 
-The deterministic `Recovery` middleware owns explicitly transient read retries, capped
-backoff, respecting Retry-After as a minimum, domain-bound argument correction, schema-feedback
-retries, primary lookup fallback after exhausted errors, and ambiguous-write reconciliation.
-It has no access to expected answers or the fault schedule. Corrections use public task
-bindings, not evaluator truth. It can strip a documented `_typo` suffix, restore lookup keys,
-or restore create-ticket task fields; it does not guess arbitrary arguments.
+Retry-After is a minimum, never capped downward. Exponential backoff is capped at 0.1 seconds
+before applying Retry-After. If a wait would exhaust the run deadline, record a skipped retry.
+Schema-invalid read results may be retried under the resilient policy. Unknown arbitrary
+arguments are not guessed: correction only fills the explicit recipe's permitted task fields.
 
-The scripted agent executes a predefined sequence. Its resilient disagreement rule chooses
-the task's vetted secondary snapshot. This is a script decision, explicitly recorded with
-`owner: scripted_agent`; middleware actions have `owner: deterministic_middleware`.
-Arithmetic verification checks consistency against observed items, not the hidden ground truth.
-The live model owns its native next-call selection and final structured answer. Both modes
-use the same middleware and evaluator. A live model may select a fallback itself after
-successful but questionable observations; fallback metrics count explicit recorded actions,
-so implicit live strategies are not inferred from model prose.
+## Write services
 
-The curated fake write service accepts a client idempotency key but does not enforce
-deduplication (`deduplicate_writes: false` in initial state). An unguarded repeated request
-really can create duplicate records. Other fake environments can opt into key enforcement.
-The tool is marked `retry_safe=False`. A lost response
-does not prove a failed write. Resilient recovery queries the same idempotency key, verifies
-exactly one matching title, and returns the verified record. It makes no second write.
-If reconciliation fails, the run stops with an ambiguous result. Neither policy blindly
-retries a write. This does not model distributed transaction isolation or real-service guarantees.
+The new tools explicitly distinguish:
 
-## Budgets and cancellation
+- `create_correlation_ticket` / `find_correlation_ticket`: request_key correlates records and
+  does not enforce deduplication. Repeating a create can produce duplicate state.
+- `create_idempotent_ticket` / `find_idempotent_ticket`: equivalent title+key requests return
+  the existing record. Reusing a key with a different title raises a permanent idempotency conflict
+  without mutation. Enforcement is atomic only within this cooperative single-process simulator.
 
-Tool calls and model calls have global run limits. Agent steps include each decision (script
-steps are not model requests). `max_retries` and `max_corrections` are per logical requested
-call; the global tool budget bounds their combined effects. All middleware attempts consume
-the tool budget. Retry-After greater than the remaining deadline produces no retry.
-Backoff is `min(0.01 * 2**attempt, 0.1)` seconds, then raised to any Retry-After minimum.
+Legacy create_ticket/find_ticket and their historical idempotency_key field remain for the old
+suite. New experiments use the clear names. Every write is conservatively non-retry-safe.
+After ambiguity the policy queries the same key and checks exactly one matching record.
+Zero, multiple, conflicting or unavailable records leave the result uncertain. Neither service
+variant is automatically re-written after ambiguity; server idempotency does not by itself
+satisfy the task's existence-verification requirement.
 
-An asyncio run deadline encloses orchestration. `wait_for` enforces per-tool timeouts and
-awaits cooperative cancellation. Real delayed coroutines exercise both timeouts and lost
-write responses. Setup, scoring and file export add small overhead outside the orchestration
-deadline. Blocking or cancellation-resistant production handlers are outside this MVP.
+Diagnostic-only state probes snapshot records before/after handlers. A handler returning is
+not proof of a commit: write_state_checked records the snapshot comparison; environment_commit
+requires a real state change. A write can be committed even when its response subsequently times
+out. Final scoring independently checks state, matching content, duplicates and verification
+call evidence. Fault fixtures can produce no state, duplicate state or conflicting content to
+exercise unresolved reconciliation; such induced duplicates are distinguished from agent retries.
 
-Model completion tokens are requested within the remaining token allowance; reported input
-and output usage is checked before tools execute. Input usage cannot be known exactly in
-advance for arbitrary hosted models; one request can overshoot. No provider retry is hidden:
-the SDK is configured with `max_retries=0`. The runner closes provider clients on completion
-and cancellation. Each repeat starts a fresh client conversation and environment.
+## Independent invoice evidence
 
-## Outcomes and persistence
+Primary and finance-reference invoices live in different state fields/deep-copied arrays and
+have separate tools/fault targets. Responses include source and authority. They do not merely
+recalculate the same input. Agreement permits calculation; a vetted reference can resolve a
+corrupted primary; peer disagreement or reference unavailability requires abstention. Resilient
+middleware can perform the independent check and return the selected source with supporting
+call IDs; the script/live model can also follow the public task instructions itself. The original
+single-source failure is retained unchanged. Correlated corruption in both stores remains a
+limitation, with an explicit test showing false completion rejected by the evaluator.
 
-`scoring.py` checks persisted answers or exact record state and requires evidence of relevant
-successful tool calls. A create commit alone does not satisfy the verification requirement.
-Claimed success has no power to change task completion. Communication additionally checks
-that a terminal completion claim is supported and the final answer matches persisted state.
-Safety checks no duplicate records and no unexpected record titles or keys.
+## Fault schedules and artifacts
 
-Events have stable run/scenario IDs, sequence numbers, UTC timestamps, monotonic elapsed time,
-call IDs, result durations, error categories and explicit recovery actions. The final event
-contains deterministic assertion results and outcome. No hidden chain-of-thought is requested
-or stored. The provider retains ordinary conversation content only, not reasoning fields.
+One occurrence = one executor entry under the original tool name, including original invalid
+attempts and middleware attempts. Invalid original calls count but cannot activate injection.
+Transient rules target exactly the selected occurrence; persistent rules target it and later
+occurrences. Probability draws use seeded per-rule RNGs; misses consume the eligible occurrence.
+First activated matching rule wins per call. A scenario can have additional explicit rules.
+Fault selection is not activation: post-execution and corruption faults activate only when those
+points are actually reached. Diagnostics record planned/actual tool, occurrence, phase and change.
+Run- and rule-level coverage remain separate from recovery denominators.
 
-`tracing.redact` recursively masks common credential field names and recognizable `sk-…` or
-Bearer strings. Token *counts* and synthetic idempotency keys remain visible. The same redaction
-applies to summaries. Arbitrary secrets, PII, and encoded credentials can evade it; use synthetic
-inputs and review artifacts before sharing. Raw provider exception text is omitted entirely.
+Experiment planning uses a recorded seeded shuffle of scenario/policy/repeat tuples. Fresh state
+and conversation for every tuple; identical injection seed per paired repetition. Manifests retain
+actual execution order. Previews are network-free and include budgets, pricing assumptions,
+conditional ceilings and schedule. CLI live execution requires an explicit --allow-paid flag
+as well as credentials. No paid requests have been made during Phase 2 development.
 
-Reports follow the experiment manifest rather than mixing leftover runs. Playback reads and
-validates event sequences without performing any tool/model execution. Streamlit is only a
-consumer. The event schema leaves room for a later OpenTelemetry exporter using run IDs,
-call IDs, durations, and event types; there is no exporter or telemetry service in the MVP.
-
-## Extension points
-
-Add a typed tool and handler to `Environment.registry`; mark retry safety conservatively.
-Add a fault kind/phase and mutation or interception branch through the existing injector.
-Add a scenario with initial state, public task, tool allowlist, assertions, budgets, and rule.
-For a new task family, add explicit scripted behavior and independent state assertions.
-A new provider implements `Agent.decide`, `observe`, and optional `close`; it receives no
-injection/evaluation internals. Add tests for the new boundary rather than relying on a demo alone.
+Summaries keep artifact version and experiment kind separate. The dashboard loads the latest
+manifest, supports filtering old/new data, shows fixed-scale separate metrics, highlights
+fault/recovery lineage and expands raw events. Playback only reads saved data; it is not
+re-execution. Credential redaction remains heuristic; use synthetic inputs and review before
+sharing. No database, distributed coordinator, production integration or telemetry exporter.
