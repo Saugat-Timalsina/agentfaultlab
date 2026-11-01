@@ -1,0 +1,19 @@
+name: Offline checks
+on: [push, pull_request]
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install -e '.[dev,live]'
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+      - run: agentfaultlab demo
+      - run: python -m pip check

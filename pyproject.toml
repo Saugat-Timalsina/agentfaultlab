@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.25,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentfaultlab"
+version = "0.1.0"
+description = "A local experiment lab for controlled tool faults and evidence-backed outcomes"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.10,<3", "typer>=0.15,<1", "PyYAML>=6,<7", "streamlit>=1.40,<2"]
+
+[project.optional-dependencies]
+live = ["openai>=2,<4"]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "ruff>=0.11,<1"]
+
+[project.scripts]
+agentfaultlab = "agentfaultlab.cli:app"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = ["live: opt-in tests making actual provider requests"]
+addopts = "-m 'not live'"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]

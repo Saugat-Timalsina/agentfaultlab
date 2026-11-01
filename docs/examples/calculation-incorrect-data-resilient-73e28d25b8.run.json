@@ -1,0 +1,102 @@
+{
+  "run_id": "calculation-incorrect-data-resilient-73e28d25b8",
+  "scenario_id": "calculation-incorrect-data",
+  "family": "calculation",
+  "policy": "resilient",
+  "mode": "scripted",
+  "model": null,
+  "seed": 7,
+  "repeat": 0,
+  "fault_type": "incorrect_data",
+  "fault_planned": {
+    "id": "calculation-incorrect-data-fault",
+    "kind": "incorrect_data",
+    "target_tool": "get_items",
+    "occurrence": 1,
+    "behavior": "transient",
+    "probability": 1,
+    "seed": 7,
+    "retry_after": 0.005
+  },
+  "fault_activations": 1,
+  "completed": false,
+  "recovered": false,
+  "safe": true,
+  "safe_failure": false,
+  "honest": false,
+  "duplicate_side_effects": 0,
+  "invalid_tool_calls": 0,
+  "agent_invalid_calls": 0,
+  "injected_invalid_calls": 0,
+  "retries": 0,
+  "fallbacks": 0,
+  "corrections": 0,
+  "tool_calls": 3,
+  "model_calls": 0,
+  "steps": 4,
+  "duration_s": 0.0011107079990324564,
+  "input_tokens": null,
+  "output_tokens": null,
+  "dollar_cost": null,
+  "stop_reason": "agent_finished",
+  "harness_error": null,
+  "assertions": {
+    "persisted_answer": false,
+    "answer_submitted": true,
+    "retrieved_and_calculated": true
+  },
+  "expected_state": {
+    "answer": 3450
+  },
+  "actual_state": {
+    "items": [
+      {
+        "unit_price": 1200,
+        "quantity": 2
+      },
+      {
+        "unit_price": 350,
+        "quantity": 3
+      }
+    ],
+    "answer": 3464,
+    "records": []
+  },
+  "final_answer": 3464,
+  "final_status": "complete",
+  "dependency_versions": {
+    "python": "3.12.16",
+    "agentfaultlab": "0.1.0",
+    "pydantic": "2.14.2",
+    "typer": "0.27.3",
+    "streamlit": "1.66.1",
+    "PyYAML": "6.0.3",
+    "openai": "3.42.0"
+  },
+  "config": {
+    "scenarios": [
+      "all"
+    ],
+    "policies": [
+      "fail_fast",
+      "bounded_retry",
+      "resilient"
+    ],
+    "mode": "scripted",
+    "model": null,
+    "seed": 7,
+    "repeats": 1,
+    "output_dir": "results/demo",
+    "budgets": {
+      "max_steps": 18,
+      "max_tool_calls": 24,
+      "max_retries": 2,
+      "max_corrections": 1,
+      "elapsed_s": 4,
+      "tool_timeout_s": 0.025,
+      "max_model_calls": 12,
+      "max_tokens": 6000
+    }
+  },
+  "trace_file": "calculation-incorrect-data-resilient-73e28d25b8.jsonl"
+}

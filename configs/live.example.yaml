@@ -1,0 +1,17 @@
+# Replace model with a tool-calling model ID available to your OpenAI account.
+mode: live
+model: REPLACE_WITH_YOUR_MODEL_ID
+scenarios: [lookup-control, lookup-timeout, creation-commit-timeout]
+policies: [fail_fast, bounded_retry, resilient]
+repeats: 3
+seed: 7
+output_dir: results/live
+budgets:
+  max_steps: 18
+  max_tool_calls: 24
+  max_retries: 2
+  max_corrections: 1
+  elapsed_s: 120
+  tool_timeout_s: 0.05
+  max_model_calls: 12
+  max_tokens: 30000
