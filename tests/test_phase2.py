@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from click import unstyle
 from typer.testing import CliRunner
 
 from agentfaultlab.budget import BudgetExceeded, RunBudget
@@ -392,9 +393,10 @@ def test_schedule_and_preview_are_reproducible_and_network_free():
     )
     assert result.exit_code == 0 and json.loads(result.output)["planned_runs"] == 3
     blocked = CliRunner().invoke(
-        app, ["run", "--config", str(root / "configs/phase2/smoke-v1.yaml")]
+        app, ["run", "--config", str(root / "configs/phase2/smoke-v1.yaml")], color=True
     )
-    assert blocked.exit_code != 0 and "--allow-paid" in blocked.output
+    # Rich may insert ANSI styling within option names on CI terminals.
+    assert blocked.exit_code != 0 and "--allow-paid" in unstyle(blocked.output)
 
 
 async def test_chart_explicit_full_percentage_domain_and_summary_groups(tmp_path):

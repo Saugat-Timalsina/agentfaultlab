@@ -69,3 +69,9 @@ The authenticated account already had an empty public `AgentFaultLab` repository
 Publication reuses it under the requested lowercase name, without force-pushing or replacing
 unrelated work. [GitHub Actions](https://github.com/Saugat-Timalsina/agentfaultlab/actions) is the
 source of CI status for the published commit; earlier local records do not claim GitHub execution.
+
+The first GitHub run exposed a terminal-formatting portability issue: both Python versions
+reached 118 passing tests and failed the same CLI error-text assertion because ANSI styling
+interrupted an option name. The assertion now removes ANSI styling and explicitly exercises
+colored output; runtime behavior is unchanged. The targeted test passed locally with
+`FORCE_COLOR=1`, and lint/format checks passed. The follow-up CI run verifies the full matrix.
