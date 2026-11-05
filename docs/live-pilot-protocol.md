@@ -121,3 +121,13 @@ agentfaultlab run --config configs/phase2/pilot-v1.yaml --allow-paid
 
 No command above has been used here to make paid requests. Offline adapter tests use a controlled
 HTTP transport and placeholder credentials. Neither previews nor stored configuration contain keys.
+
+## Readiness recheck — 2026-11-04
+
+No live results have been produced. The model, prompts, schedule, budgets, prices and output
+directories above remain the prepared v1 protocol. Official request/model documentation was
+rechecked on this date; the configured dated pricing assumptions still match the published page.
+The [follow-up audit](phase2-audit.md#follow-up-audit--2026-11-04) strengthens evidence assertions
+and provider-protocol handling before any paid execution. The separate offline recheck uses
+`configs/phase2/offline-hardening-v1.yaml`; it is excluded from smoke/pilot results. See
+[actual verification](phase2-verification-20261104.md) for readiness checks and preview values.

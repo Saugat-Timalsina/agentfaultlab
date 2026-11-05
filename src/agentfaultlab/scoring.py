@@ -19,12 +19,28 @@ def score(scenario: Scenario, state: dict, events: list[TraceEvent]) -> tuple[di
         expected = scenario.expected_state
         records = state["records"]
         key = "request_key" if "request_key" in expected else "idempotency_key"
+        create_tool = scenario.bindings.get("create_tool", "create_ticket")
+        find_tool = scenario.bindings.get("find_tool", "find_ticket")
+        last_write = max(
+            (e.seq for e in events if e.event_type == "tool_call" and e.tool_name == create_tool),
+            default=-1,
+        )
+        verified = any(
+            e.event_type == "observed_result"
+            and e.tool_name == find_tool
+            and e.seq > last_write
+            and e.payload.get("error") is None
+            and len(found := (e.payload.get("data") or {}).get("records", [])) == 1
+            and found[0].get(key) == expected[key]
+            and found[0].get("title") == expected["title"]
+            and any(r == found[0] for r in records)
+            for e in events
+        )
         assertions = {
             "exactly_one_record": len(records) == expected["record_count"],
             "matching_record": bool(records)
             and all(r["title"] == expected["title"] and r[key] == expected[key] for r in records),
-            "existence_verified": scenario.bindings.get("find_tool", "find_ticket")
-            in successful_tools,
+            "existence_verified": verified,
             "no_duplicates": duplicates == 0,
         }
     else:
@@ -63,6 +79,27 @@ def assertion_details(scenario, state, events, assertions):
         elif name == "no_duplicates":
             keys = [r.get("request_key", r.get("idempotency_key")) for r in state["records"]]
             expected, observed = 0, len(keys) - len(set(keys))
+        elif name == "existence_verified":
+            expected = "One matching stored record observed after the last write attempt"
+            create_tool = scenario.bindings.get("create_tool", "create_ticket")
+            find_tool = scenario.bindings.get("find_tool", "find_ticket")
+            observed = {
+                "write_sequences": [
+                    e.seq
+                    for e in events
+                    if e.event_type == "tool_call" and e.tool_name == create_tool
+                ],
+                "verification_results": [
+                    {
+                        "seq": e.seq,
+                        "call_id": e.call_id,
+                        "data": e.payload.get("data"),
+                        "error": e.payload.get("error"),
+                    }
+                    for e in events
+                    if e.event_type == "observed_result" and e.tool_name == find_tool
+                ],
+            }
         else:
             expected = {
                 "answer_submitted": "submit_answer",

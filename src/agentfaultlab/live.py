@@ -142,11 +142,56 @@ class OpenAIAgent:
             raise ProviderFailure(
                 f"OpenAI request failed ({type(exc).__name__})", code=code
             ) from None
-        if not response.choices:
-            raise ProviderFailure("Provider returned no choices")
+        # Keep available usage even when the provider's response envelope is invalid.
+        usage = getattr(response, "usage", None)
+        tokens = {
+            "input_tokens": getattr(usage, "prompt_tokens", None),
+            "output_tokens": getattr(usage, "completion_tokens", None),
+        }
+        choices = getattr(response, "choices", None)
+        if not isinstance(choices, list) or len(choices) != 1:
+            raise ProviderFailure("Provider must return one choice", code="protocol", **tokens)
         choice = response.choices[0]
-        message = choice.message
-        calls = message.tool_calls or []
+        finish_reason = getattr(choice, "finish_reason", None)
+        if self.trace:
+            self.trace.emit(
+                "model_response",
+                {
+                    "provider_model": response.model,
+                    "finish_reason": finish_reason,
+                    **tokens,
+                },
+                owner="model",
+            )
+        if finish_reason == "length":
+            raise ProviderFailure(
+                "Truncated provider response; no partial calls executed", code="truncated", **tokens
+            )
+        if finish_reason == "content_filter":
+            return Decision(status="abstain", summary="Provider filtered the response.", **tokens)
+        if finish_reason not in {"stop", "tool_calls"}:
+            raise ProviderFailure("Unsupported provider finish reason", code="protocol", **tokens)
+        message = getattr(choice, "message", None)
+        if message is None or not isinstance(getattr(message, "content", None), (str, type(None))):
+            raise ProviderFailure("Invalid provider message", code="protocol", **tokens)
+        calls = getattr(message, "tool_calls", None) or []
+        if not isinstance(calls, list) or any(
+            getattr(c, "type", None) != "function"
+            or not isinstance(getattr(c, "id", None), str)
+            or not c.id
+            or not isinstance(getattr(getattr(c, "function", None), "name", None), str)
+            or not isinstance(getattr(getattr(c, "function", None), "arguments", None), str)
+            for c in calls
+        ):
+            raise ProviderFailure(
+                "Invalid native function-call envelope", code="protocol", **tokens
+            )
+        if calls and len({c.id for c in calls}) != len(calls):
+            raise ProviderFailure(
+                "Provider returned duplicate tool-call IDs", code="protocol", **tokens
+            )
+        if finish_reason == "tool_calls" and not calls:
+            raise ProviderFailure("Missing native tool calls", code="protocol", **tokens)
         assistant = {"role": "assistant", "content": message.content}
         if calls:
             assistant["tool_calls"] = [
@@ -162,24 +207,8 @@ class OpenAIAgent:
             ]
         # Store only ordinary assistant content and native call records, never reasoning fields.
         self.messages.append(assistant)
-        tokens = {
-            "input_tokens": response.usage.prompt_tokens if response.usage else None,
-            "output_tokens": response.usage.completion_tokens if response.usage else None,
-        }
-        if self.trace:
-            self.trace.emit(
-                "model_response",
-                {"provider_model": response.model, "finish_reason": choice.finish_reason, **tokens},
-                owner="model",
-            )
-        if choice.finish_reason == "length":
-            raise ProviderFailure(
-                "Truncated provider response; no partial calls executed", code="truncated", **tokens
-            )
         if calls:
             ids = [c.id for c in calls]
-            if len(set(ids)) != len(ids):
-                raise ProviderFailure("Provider returned duplicate tool-call IDs")
             self.pending = set(ids)
             parsed = []
             for call in calls:

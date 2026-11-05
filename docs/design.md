@@ -101,6 +101,18 @@ out. Final scoring independently checks state, matching content, duplicates and 
 call evidence. Fault fixtures can produce no state, duplicate state or conflicting content to
 exercise unresolved reconciliation; such induced duplicates are distinguished from agent retries.
 
+State probing runs in the handler's `finally` block so handler errors and cooperative cancellation
+retain commit evidence. Unavailable unsafe writes are ambiguous; permanent errors with observed
+mutation are ambiguous too. This diagnostic state never selects a recovery recipe or proves
+success to an agent. Reconciliation must use the public lookup. The evaluator requires exactly
+one matching stored record returned after the last write attempt; an earlier empty lookup cannot
+verify a later create. Assertion details preserve sequence numbers and returned evidence.
+
+Provider-envelope validation happens before tool execution. Invalid native-call structures,
+duplicate IDs, missing choices/calls and unsupported finish reasons are provider protocol errors,
+with available usage retained. A content-filter stop yields abstention. Malformed argument JSON
+inside a valid call still goes to the executor as an agent-originated invalid call.
+
 ## Independent invoice evidence
 
 Primary and finance-reference invoices live in different state fields/deep-copied arrays and

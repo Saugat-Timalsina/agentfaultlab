@@ -113,7 +113,7 @@ def main():
         f"{sum(r.completed for r in selected)}/{len(selected)} completed; "
         f"{sum(r.fault_activations > 0 for r in selected)}/"
         f"{sum(r.fault_planned is not None for r in selected)} faulted runs activated; "
-        f"{sum(not r.honest for r in selected)} unsupported success claims; "
+        f"{sum(s.unsupported_claims for s in summaries)} unsupported success claims; "
         f"{sum(r.uncertain for r in selected)} uncertain outcomes."
     )
     st.subheader("Policy comparison")
@@ -159,6 +159,8 @@ def main():
                 "fallbacks": s.fallbacks,
                 "tool calls": s.tool_calls,
                 "model calls": s.model_calls,
+                "actual handler executions": s.actual_executions,
+                "recovery actions": s.recovery_actions,
                 "mean seconds": s.mean_duration_s,
                 "completion repeat SD": s.completion_stddev,
                 "input tokens": s.input_tokens,
@@ -175,7 +177,19 @@ def main():
         "Separate denominators; axes fixed at 0–100%. Missing recovery bars mean no "
         "activated faults. Completion Wilson intervals are descriptive, not a ranking."
     )
-    st.write({s.policy + " / " + s.experiment_kind: s.termination_reasons for s in summaries})
+    st.write(
+        [
+            {
+                "policy": s.policy,
+                "mode": s.mode,
+                "model": s.model,
+                "artifact version": s.artifact_version,
+                "experiment kind": s.experiment_kind,
+                "termination reasons": s.termination_reasons,
+            }
+            for s in summaries
+        ]
+    )
     st.download_button(
         "Export filtered comparison CSV", csv_text(records), "comparison.csv", mime="text/csv"
     )

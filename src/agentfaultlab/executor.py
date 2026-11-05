@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from copy import deepcopy
 
 from pydantic import ValidationError
 
@@ -126,32 +127,38 @@ class ToolExecutor:
                 )
 
         tool = self.registry[effective.name]
-        before = tool.state_probe() if tool.state_probe else None
+        before = deepcopy(tool.state_probe()) if tool.state_probe else None
+        state_changed = False
 
         async def invoke():
+            nonlocal state_changed
             if rule and rule.kind == "exception":
                 raise ToolUnavailable("Synthetic temporary service outage")
             if rule and rule.kind == "timeout":
                 await asyncio.sleep(self.timeout_s * 4 + 0.05)
             self.budget.check()
             self.budget.counts["actual_executions"] += 1
-            data = await tool.handler(**args)
-            if tool.state_probe:
-                after = tool.state_probe()
-                changed = before != after
-                self.trace.emit(
-                    "write_state_checked",
-                    {"before": before, "after": after, "state_changed": changed},
-                    tool_name=call.name,
-                    call_id=call.id,
-                )
-                if changed:
+            try:
+                data = await tool.handler(**args)
+            finally:
+                # A handler can commit and then fail or be cancelled before returning.
+                # This diagnostic evidence never enters the model-visible result.
+                if tool.state_probe:
+                    after = deepcopy(tool.state_probe())
+                    state_changed = before != after
                     self.trace.emit(
-                        "environment_commit",
-                        {"verified_state_change": True, "before": before, "after": after},
+                        "write_state_checked",
+                        {"before": before, "after": after, "state_changed": state_changed},
                         tool_name=call.name,
                         call_id=call.id,
                     )
+                    if state_changed:
+                        self.trace.emit(
+                            "environment_commit",
+                            {"verified_state_change": True, "before": before, "after": after},
+                            tool_name=call.name,
+                            call_id=call.id,
+                        )
             if rule and rule.kind == "commit_timeout":
                 self.injector.activations.append(activation)
                 self.trace.emit("fault_activated", activation, tool_name=call.name, call_id=call.id)
@@ -177,11 +184,17 @@ class ToolExecutor:
                     code="unavailable",
                     message=str(exc),
                     transient=True,
+                    ambiguous=not tool.definition.retry_safe,
                 )
             )
         except DomainError as exc:
             return finish(
-                error=ToolError(category="tool_environment", code="domain_error", message=str(exc))
+                error=ToolError(
+                    category="tool_environment",
+                    code="domain_error",
+                    message=str(exc),
+                    ambiguous=state_changed and not tool.definition.retry_safe,
+                )
             )
         # Unexpected exceptions deliberately propagate to the runner's harness boundary.
         if rule and rule.phase == "response_corruption":

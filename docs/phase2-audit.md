@@ -47,3 +47,46 @@ unsourced promise of future rates or account availability. SDK automatic retries
 
 Observed checks and actual commands are recorded in [Phase 2 verification](phase2-verification.md).
 No paid requests or live results were produced.
+
+## Follow-up audit — 2026-11-04
+
+The repository already contained Phase 2 at `1b7e26a` when this request was received.
+Inspected executor, budgets, policies/recipes, runner, live adapter, scoring/reporting and
+dashboard before changing behavior. The baseline passed 96 offline tests (one live test
+deselected). Existing Phase 1 and Phase 2 artifacts were retained.
+
+Confirmed additional defects and fixes:
+
+- **Handler interruption lost commit evidence.** The state probe ran only after normal handler
+  return. It now runs in a handler `finally` block, including service exceptions, timeout and
+  cancellation. Snapshots are copied to avoid mutable aliases. Unexpected Python exceptions
+  still propagate as harness defects; diagnostic state is never returned to the model.
+- **Write service errors could hide ambiguity.** A transient unavailable response on an unsafe
+  write now explicitly carries ambiguity. A permanent service error after a verified mutation
+  is also ambiguous. This invokes the declared reconciliation recipe without repeating the write.
+  An idempotency conflict with no mutation remains a permanent nonambiguous error.
+- **Verification scoring accepted any successful lookup.** Even an empty lookup before a later
+  create could satisfy the evidence assertion. Completion now requires one matching record
+  observed after the last write attempt, identical to a stored record. Failed assertion details
+  include write/result sequence numbers and returned records.
+- **Invalid response envelopes lost usage or looked like harness defects.** Empty choices and
+  duplicate IDs now retain reported usage. Unsupported custom calls, missing function envelopes,
+  missing calls and unsupported finish reasons terminate as provider protocol failures before
+  any tool execution. Content-filtered responses abstain without executing partial calls.
+  Arbitrary adapter programming errors remain harness failures.
+- **Dashboard summaries could disagree or overwrite groups.** The headline now uses the same
+  unsupported-claim exclusion rules as the report. Termination summaries retain every complete
+  configuration identity instead of overwriting configurations sharing a policy/kind label.
+
+Rechecked the official [request API](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
+and [configured model page](https://developers.openai.com/api/docs/models/gpt-5.6-terra)
+on 2026-11-04. The published $2 input / $12 output per million and 1.25× cache-write
+assumptions still match the dated configurations; their original retrieval dates remain intact.
+No live requests or account-access verification were performed.
+
+The original deadline concerns remain qualified as above: the runner already had an outer
+deadline, and final evaluator/export work still lies outside orchestration. Shared attempts bound
+actual executions without a separate handler cap. Cooperative cancellation, synthetic authority,
+correlated corruption and approximate billing remain limitations, not newly fixed defects.
+The new recheck configuration uses protocol `phase2-hardening-v1` and a fresh output directory;
+the serialized artifact schema remains backward-compatible `phase2-v1`.

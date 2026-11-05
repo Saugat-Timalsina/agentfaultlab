@@ -17,8 +17,8 @@ from agentfaultlab.recipes import Recipe
 from agentfaultlab.reporting import load_results, summarize
 from agentfaultlab.runner import run_one
 from agentfaultlab.scenarios import scenario_catalog
-from agentfaultlab.schemas import Budgets, ExperimentConfig, ToolCall
-from agentfaultlab.tools import DomainError, Environment
+from agentfaultlab.schemas import Budgets, Decision, ExperimentConfig, ToolCall
+from agentfaultlab.tools import DomainError, Environment, ToolUnavailable
 from agentfaultlab.tracing import Trace, load_trace
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -200,6 +200,87 @@ async def test_commit_event_requires_real_state_change():
     )
     assert result.error.ambiguous and not env.state["records"]
     assert not any(e.event_type == "environment_commit" for e in trace.events)
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "domain", "timeout", "cancel"])
+async def test_commit_inside_failing_handler_keeps_evidence_and_never_repeats(failure):
+    scenario = scenario_catalog()["correlation-write-lost-response"].model_copy(deep=True)
+    scenario.fault = None  # Test a failure inside the service rather than the injector.
+    env, trace, _, executor, policy = boundary(scenario)
+    original = executor.registry["create_correlation_ticket"].handler
+    committed = asyncio.Event()
+
+    async def write_then_fail(**args):
+        await original(**args)
+        committed.set()
+        if failure == "unavailable":
+            raise ToolUnavailable("Response lost after commit")
+        if failure == "domain":
+            raise DomainError("Service failed after commit")
+        await asyncio.sleep(10)
+
+    executor.registry["create_correlation_ticket"].handler = write_then_fail
+    task = asyncio.create_task(
+        policy.execute(
+            ToolCall(
+                id="write",
+                name="create_correlation_ticket",
+                arguments={"title": "Investigate sensor", "request_key": "request-001"},
+            )
+        )
+    )
+    if failure == "cancel":
+        await committed.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        result = await task
+        assert result.ok and result.recovery_result == "reconciled_existing_write"
+        assert len(result.supporting_call_ids) == 2
+    assert len(env.state["records"]) == 1
+    assert sum(e.event_type == "environment_commit" for e in trace.events) == 1
+    assert (
+        sum(e.event_type == "tool_call" and e.tool_name.startswith("create") for e in trace.events)
+        == 1
+    )
+    assert policy.retries == 0
+
+
+async def test_empty_read_before_write_does_not_verify_later_commit(tmp_path):
+    class PrematureVerification:
+        async def decide(self, ctx):
+            if ctx.observations:
+                return Decision(status="complete", answer="T-1")
+            return Decision(
+                calls=[
+                    ToolCall(
+                        id="read",
+                        name="find_correlation_ticket",
+                        arguments={"request_key": "request-001"},
+                    ),
+                    ToolCall(
+                        id="write",
+                        name="create_correlation_ticket",
+                        arguments={"title": "Investigate sensor", "request_key": "request-001"},
+                    ),
+                ]
+            )
+
+        def observe(self, call, result):
+            pass
+
+    scenario = scenario_catalog()["correlation-write-lost-response"].model_copy(deep=True)
+    scenario.fault = None
+    result = await run_one(
+        scenario,
+        "resilient",
+        ExperimentConfig(output_dir=str(tmp_path)),
+        agent=PrematureVerification(),
+    )
+    assert len(result.actual_state["records"]) == 1
+    assert not result.assertions["existence_verified"]
+    assert not result.completed and not result.honest
 
 
 async def test_server_idempotency_and_conflict_are_explicit():

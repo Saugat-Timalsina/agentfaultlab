@@ -63,6 +63,66 @@ def native_call(name="lookup_primary", args='{"key":"capacity"}', call_id="a"):
     return {"id": call_id, "type": "function", "function": {"name": name, "arguments": args}}
 
 
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "empty_choices",
+        "duplicate_ids",
+        "custom_call",
+        "missing_function",
+        "missing_calls",
+        "finish_reason",
+    ],
+)
+async def test_invalid_provider_envelope_keeps_usage_and_does_not_execute(tmp_path, defect):
+    def handler(request):
+        response = completion({"role": "assistant", "content": None, "tool_calls": [native_call()]})
+        choice = response["choices"][0]
+        if defect == "empty_choices":
+            response["choices"] = []
+        elif defect == "duplicate_ids":
+            choice["message"]["tool_calls"].append(native_call())
+        elif defect == "custom_call":
+            choice["message"]["tool_calls"] = [
+                {"id": "custom", "type": "custom", "custom": {"name": "unsupported", "input": "x"}}
+            ]
+        elif defect == "missing_function":
+            choice["message"]["tool_calls"][0].pop("function")
+        elif defect == "missing_calls":
+            choice["finish_reason"] = "tool_calls"
+            choice["message"]["tool_calls"] = []
+        else:
+            choice["finish_reason"] = "function_call"  # Unsupported legacy protocol.
+        return httpx.Response(200, json=response)
+
+    result = await run_one(
+        scenario_catalog()["lookup-control"],
+        "resilient",
+        ExperimentConfig(mode="live", model="mock", output_dir=str(tmp_path)),
+        agent=OpenAIAgent("mock", client_for(handler)),
+    )
+    assert result.provider_error == "protocol" and result.harness_error is None
+    assert result.input_tokens == 100 and result.output_tokens == 10
+    assert result.tool_calls == 0 and not result.recovered and not result.safe_failure
+
+
+async def test_content_filtered_response_abstains_without_executing_calls(tmp_path):
+    def handler(request):
+        response = completion({"role": "assistant", "content": None, "tool_calls": [native_call()]})
+        response["choices"][0]["finish_reason"] = "content_filter"
+        return httpx.Response(200, json=response)
+
+    result = await run_one(
+        scenario_catalog()["lookup-control"],
+        "resilient",
+        ExperimentConfig(mode="live", model="mock", output_dir=str(tmp_path)),
+        agent=OpenAIAgent("mock", client_for(handler)),
+    )
+    assert result.final_status == "abstain" and result.honest
+    assert result.tool_calls == 0 and result.input_tokens == 100
+    assert result.harness_error is None and result.provider_error is None
+
+
 async def test_truncated_native_calls_never_execute_and_usage_is_kept(tmp_path):
     def handler(request):
         response = completion({"role": "assistant", "content": None, "tool_calls": [native_call()]})

@@ -7,6 +7,12 @@ Phase 2 adds shared resource budgets, traceable recovery, explicit correlation/i
 services, independent invoice evidence and a prepared live-agent pilot. All tools remain local
 and synthetic. Scripted results test this implementation and its recipes, not LLM intelligence.
 
+The 2026-11-04 follow-up audit hardens interrupted-write evidence, post-write verification,
+and invalid provider-response accounting. Run the separately labeled recheck with
+`agentfaultlab run --config configs/phase2/offline-hardening-v1.yaml`; saved v1 artifacts are preserved.
+See [the audit addendum](docs/phase2-audit.md#follow-up-audit--2026-11-04) and
+[observed verification](docs/phase2-verification-20261104.md).
+
 ## Open and explore on this Mac
 
 Project: `~/Desktop/AgentFaultLab`. In VS Code choose **File → Open Folder → Desktop →

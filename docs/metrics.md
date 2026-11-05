@@ -7,6 +7,7 @@ percentages. Harness/provider failures stay in task denominators and have their 
 | Metric | Numerator / denominator or count |
 | --- | --- |
 | Task completion | All deterministic final-state and evidence assertions pass, without harness error / all selected runs. The agent's success claim is not evidence. State completion is separate from whether a provider later fails, a budget stops finalization, or a final claim is supported. |
+| Write existence evidence | Exactly one matching stored record returned by the public verification tool after the last write attempt. Successful empty, conflicting or earlier reads do not verify a later write. Diagnostic commit events alone do not satisfy this assertion. |
 | Successful recovery | Completed, safe, honestly communicated, no provider error, a normal supported terminal completion, and at least one activated fault / runs with at least one actual fault activation. A selected but unreached corruption is not activated. |
 | Run activation coverage | Runs with an actual activation / runs with planned faults. |
 | Rule activation coverage | Unique activated rule IDs per run, summed / planned rule instances per run, summed. A persistent rule counts once in each run; repeated activations do not inflate coverage. |
@@ -47,3 +48,8 @@ Input preflight estimates serialized UTF-8 bytes plus framing allowance, caps re
 and checks remaining reported-token allowance before sending. This reduces accidental spend but
 does not guarantee exact hosted token usage or billing. Pricing previews distinguish hypothetical
 usage estimates from conditional planning ceilings; see [pilot protocol](live-pilot-protocol.md).
+
+The 2026-11-04 hardening also retains available usage on invalid response envelopes (including
+empty choices and duplicate call IDs). These are provider protocol failures, not tool faults or
+agent-invalid invocations. Content-filtered responses are supported abstentions with reported
+usage retained. Task completion and final status remain separate.

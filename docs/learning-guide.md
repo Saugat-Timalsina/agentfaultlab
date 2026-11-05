@@ -1,6 +1,13 @@
 > **Phase 2 update:** Read the [new walkthrough](phase2-learning.md) for shared budgets,
 > recovery lineage, explicit write services and independent invoices. The snapshots and counts
 > below are preserved **Phase 1 scripted results**, not regenerated Phase 2 or live results.
+>
+> The [2026-11-04 follow-up audit](phase2-audit.md#follow-up-audit--2026-11-04) also covers
+> commitment inside a failing handler and why an empty lookup before a write is insufficient.
+> Run `agentfaultlab run --config configs/phase2/offline-hardening-v1.yaml` for a separately
+> labeled offline recheck. In the write walkthrough, the model (or labeled script) requests
+> the create; deterministic middleware performs reconciliation and synthesizes a linked result;
+> the agent decides whether to claim completion; the evaluator checks final state and evidence.
 
 # Learning guide: follow the evidence
 
@@ -97,7 +104,8 @@ Read [`faults.py`](../src/agentfaultlab/faults.py) for corruption;
 [`agents.py`](../src/agentfaultlab/agents.py) for the limited arithmetic check;
 [`scoring.py`](../src/agentfaultlab/scoring.py) for independent truth;
 [`runner.py`](../src/agentfaultlab/runner.py) for separate completion, safety and communication.
-An independent invoice source is a useful next experiment, not an implemented recovery.
+At the time of these Phase 1 snapshots an independent source was a proposed next experiment.
+Phase 2 implements it; see [the independent-source walkthrough](phase2-learning.md).
 
 ## Results from this generated demo
 
