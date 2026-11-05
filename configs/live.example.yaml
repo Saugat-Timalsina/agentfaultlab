@@ -1,3 +1,4 @@
+# Optional and unverified with a real provider; not needed for the offline lab or publication.
 # Replace model with a tool-calling model ID available to your OpenAI account.
 mode: live
 model: REPLACE_WITH_YOUR_MODEL_ID

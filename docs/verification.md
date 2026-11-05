@@ -1,5 +1,9 @@
 # Local verification
 
+Historical Phase 1 record. The latest verified local result is **119 passed, 1 live test
+deselected**; see [release verification](public-release.md). Live testing is optional and was
+intentionally not performed for publication. Counts and scope limits below describe Phase 1.
+
 Executed on this Mac with Python 3.12.16 on 2026-11-01:
 
 - `pytest -q`: **52 passed, 1 deselected**. The deselected test is the explicit live-provider test.

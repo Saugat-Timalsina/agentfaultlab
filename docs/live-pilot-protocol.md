@@ -1,5 +1,10 @@
 # Live-agent pilot protocol — phase2-v1
 
+**Release status:** this protocol is an optional, unexecuted experiment design. The project
+owner chose not to run live LLM tests for the public release. Earlier smoke-test authorization
+is superseded. Real-provider execution is not required to use, test, or publish AgentFaultLab.
+The adapter has mocked HTTP tests only; provider compatibility and live outcomes are unverified.
+
 Prepared before producing any live results. The experiment compares **agent-plus-middleware
 configurations**, not pure model intelligence. No live execution is authorized by preparing it.
 
@@ -134,8 +139,10 @@ and provider-protocol handling before any paid execution. The separate offline r
 `configs/phase2/offline-hardening-v1.yaml`; it is excluded from smoke/pilot results. See
 [actual verification](phase2-verification-20261104.md) for readiness checks and preview values.
 
-The user subsequently authorized only one three-run smoke attempt within $1. Credentials were
-unavailable, so no provider calls were made. The [smoke readiness report](live-smoke-readiness-20261104.md)
+An earlier preparation session authorized one three-run smoke attempt within $1. Credentials
+were unavailable, so no provider calls were made. That authorization is no longer active.
+The [archived preparation report](live-smoke-readiness-20261104.md)
 records current pricing, setup instructions, remaining checks and an explicitly scripted trace
 walkthrough. Smoke execution now stops on provider/harness failures or unavailable usage and
-records unstarted runs. The 60-run pilot remains unauthorized and must wait for smoke review.
+records unstarted runs. Neither smoke nor pilot execution is planned for this release. If someone
+later chooses to run the optional pilot, they should first validate their own provider integration.

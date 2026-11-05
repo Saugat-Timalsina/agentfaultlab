@@ -1,9 +1,13 @@
 # Three-run live smoke readiness — 2026-11-04
 
+**Archived preparation record:** the owner subsequently chose an offline-only public release.
+Live tests are intentionally not being run and are not a requirement to use or publish the lab.
+The earlier execution authorization is superseded. See [release verification](public-release.md).
+
 **Not executed: credentials unavailable.** `OPENAI_API_KEY` was absent from the process
 environment; no project `.env` exists. Values were never printed. No model access/metadata or
 generation requests were made. There are no actual live traces to assess. The live path remains
-unverified against the provider; the pilot must wait for smoke execution and trace review.
+unverified against the provider. This limits live claims, not offline use or publication.
 
 ## Hardening and local preparation
 
@@ -64,9 +68,10 @@ disabled. Reported usage and priced usage must be compared with actual billing. 
 preflight makes no generation request. No requests were made here, no provider usage was
 reported, and there are no failed-request costs to reconcile from this session.
 
-## Local setup and the single authorized launch
+## Optional future setup (not part of this release)
 
-In the same local zsh terminal, enter the API key privately; do not paste it into chat or files:
+The following archived instructions describe optional future use, not an authorized next step.
+If independently choosing live execution later, supply credentials privately in a local terminal:
 
 ```sh
 cd ~/Desktop/AgentFaultLab
@@ -78,11 +83,12 @@ agentfaultlab smoke --dry-run --spending-allowance 1
 agentfaultlab smoke --allow-paid --spending-allowance 1
 ```
 
-Execute the paid command **once**. It prints and saves the new timestamped directory; do not
+Do not execute the paid command for this release. A future independently authorized attempt
+prints and saves a new timestamped directory; do not
 repeat it after an infrastructure failure. This uses the existing smoke YAML and performs no
 pilot runs. If an unexpected endpoint override is configured, review and remove it locally
 before launch. The key is read by the SDK and is excluded from configuration/artifacts/Git.
-The user's three-run authorization does not authorize a second smoke attempt or the pilot.
+No earlier conversation authorization is active for this release.
 
 After execution, use the printed directory in the dashboard (`streamlit run app.py`). Review
 each native call/result ID and response-array ordering; use transcript `sent_message_counts`
@@ -110,5 +116,5 @@ Sequence 5 is the **scripted agent's** create request; 8 verifies state change; 
 the lost-response injection; 10 observes timeout. Sequences 11–14 are deterministic
 **middleware** reconciliation and its public lookup. Sequence 15 returns a synthesized result
 linked to those calls. Sequence 19 is the script's own verification; 23 contains final
-assertions. In the pending live smoke, native requests should carry owner `model`; middleware
+assertions. In optional future live execution, native requests should carry owner `model`; middleware
 actions must retain owner `middleware`. No action in this saved scripted trace came from an LLM.

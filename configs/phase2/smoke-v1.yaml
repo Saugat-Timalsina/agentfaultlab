@@ -1,3 +1,4 @@
+# Optional unexecuted live design; mocked adapter tests only. Not a release requirement.
 protocol_version: phase2-v1
 suite_version: phase2-v1
 experiment_kind: smoke

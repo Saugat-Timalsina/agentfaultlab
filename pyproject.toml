@@ -6,6 +6,8 @@ build-backend = "hatchling.build"
 name = "agentfaultlab"
 version = "0.1.0"
 description = "A local experiment lab for controlled tool faults and evidence-backed outcomes"
+readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2.10,<3", "typer>=0.15,<1", "PyYAML>=6,<7", "streamlit>=1.40,<2"]
 

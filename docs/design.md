@@ -1,5 +1,9 @@
 # Architecture — Phase 2
 
+The public release is verified offline: 119 tests passed, one live test deselected. The optional
+provider adapter has controlled HTTP tests but no real-provider verification. No live execution
+is required for the scripted lab, dashboard, tests, or publication.
+
 The core is independent of Streamlit and any specific provider. Existing Phase 1 examples remain
 readable with defaulted new record fields; all newly generated artifacts are labeled phase2-v1.
 The original 15 scenarios remain the default suite. `configs/phase2/offline-v1.yaml` explicitly

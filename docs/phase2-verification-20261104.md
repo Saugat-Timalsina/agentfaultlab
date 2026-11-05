@@ -1,5 +1,9 @@
 # Phase 2 hardening verification — 2026-11-04
 
+This record captures the intermediate 108-test hardening check. The subsequent launch-guard
+check passed **119 tests, one live test deselected**; see [release verification](public-release.md).
+Real-provider tests are intentionally outside this offline public release.
+
 The follow-up began from `1b7e26a`. Existing source and historical examples were preserved.
 These are offline verification results, not live model measurements.
 

@@ -1,5 +1,9 @@
 # Phase 2 verification — 2026-11-01
 
+Historical initial Phase 2 record. Latest local verification: **119 passed, 1 live test
+deselected**; see [release verification](public-release.md). The public release intentionally
+uses offline verification and mocked adapter tests, with no real-provider execution requirement.
+
 Executed locally on this Mac using the existing isolated CPython 3.12.16 environment.
 No additional packages were installed and no paid provider requests were made.
 
@@ -50,7 +54,7 @@ a blind repeat write. These are scripted implementation results, not live LLM ra
 - Confidence intervals are descriptive, with fixed scenarios and small repeated samples; no broad
   statistical ranking is warranted. Redaction remains heuristic.
 
-Next authorized command to run **only after user approval**, with credentials supplied privately:
+Historical optional execution example, not a publication requirement or active authorization:
 
 ```sh
 agentfaultlab run --config configs/phase2/smoke-v1.yaml --allow-paid
