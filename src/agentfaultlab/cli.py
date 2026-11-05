@@ -28,9 +28,25 @@ def execute(config: ExperimentConfig, allow_paid=False):
             )
         if not os.environ.get("OPENAI_API_KEY"):
             raise typer.BadParameter("Live mode requires OPENAI_API_KEY in the environment.")
-    outcomes = asyncio.run(run_experiment(config))
+    if config.mode == "live" and config.experiment_kind == "smoke":
+        from agentfaultlab.smoke import launch_smoke, prepare_smoke
+
+        config, report = prepare_smoke(config)
+        typer.echo(json.dumps(report, indent=2))
+        outcomes = asyncio.run(launch_smoke(config, report))
+    else:
+        outcomes = asyncio.run(run_experiment(config))
     typer.echo(f"{len(outcomes)} {config.mode} runs saved to {Path(config.output_dir).resolve()}")
     display(outcomes)
+    if config.experiment_kind == "smoke" and smoke_failed(outcomes):
+        raise typer.Exit(1)
+
+
+def smoke_failed(outcomes):
+    return len(outcomes) != 3 or any(
+        o.provider_error or o.harness_error or o.input_tokens is None or o.output_tokens is None
+        for o in outcomes
+    )
 
 
 def display(outcomes):
@@ -68,6 +84,33 @@ def run(
         else:
             execute(configuration, allow_paid)
     except (ValueError, yaml.YAMLError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command()
+def smoke(
+    config: Annotated[Path, typer.Option(exists=True)] = Path("configs/phase2/smoke-v1.yaml"),
+    dry_run: Annotated[bool, typer.Option()] = False,
+    allow_paid: Annotated[bool, typer.Option()] = False,
+    spending_allowance: Annotated[float, typer.Option()] = 1.0,
+):
+    """Launch only the prepared three-run smoke test in a new timestamped directory."""
+    from agentfaultlab.smoke import launch_smoke, prepare_smoke
+
+    try:
+        configuration = ExperimentConfig.model_validate(yaml.safe_load(config.read_text()))
+        configuration, report = prepare_smoke(configuration, spending_allowance)
+        typer.echo(json.dumps(report, indent=2))
+        if dry_run:
+            return
+        if not allow_paid:
+            raise ValueError("Generation requires explicit --allow-paid; preview with --dry-run")
+        outcomes = asyncio.run(launch_smoke(configuration, report))
+        typer.echo(f"{len(outcomes)}/3 smoke runs saved to {configuration.output_dir}")
+        display(outcomes)
+        if smoke_failed(outcomes):
+            raise typer.Exit(1)
+    except (ValueError, OSError, yaml.YAMLError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
 

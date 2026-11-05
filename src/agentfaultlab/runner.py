@@ -423,8 +423,18 @@ async def run_one(
 async def run_experiment(config):
     catalog, schedule = scenario_catalog(), build_schedule(config)
     outcomes = []
+    suite_stop_reason = None
     for name, policy, repeat in schedule:
-        outcomes.append(await run_one(catalog[name], policy, config, repeat))
+        outcome = await run_one(catalog[name], policy, config, repeat)
+        outcomes.append(outcome)
+        if config.experiment_kind == "smoke":
+            # A broken setup must not spend the remaining allowance on later runs.
+            if outcome.harness_error or outcome.provider_error:
+                suite_stop_reason = "infrastructure_failure"
+                break
+            if outcome.input_tokens is None or outcome.output_tokens is None:
+                suite_stop_reason = "unknown_provider_usage"
+                break
     from agentfaultlab.reporting import write_report
 
     write_report(outcomes, Path(config.output_dir))
@@ -433,7 +443,14 @@ async def run_experiment(config):
         "config": config.model_dump(),
         "runs": [o.run_id for o in outcomes],
         "dependencies": dependency_versions(),
-        "execution_order": [{"scenario": n, "policy": p, "repeat": r} for n, p, r in schedule],
+        "execution_order": [
+            {"scenario": o.scenario_id, "policy": o.policy, "repeat": o.repeat} for o in outcomes
+        ],
+        "planned_execution_order": [
+            {"scenario": n, "policy": p, "repeat": r} for n, p, r in schedule
+        ],
+        "suite_stop_reason": suite_stop_reason,
+        "unstarted_runs": len(schedule) - len(outcomes),
     }
     (Path(config.output_dir) / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return outcomes

@@ -141,6 +141,12 @@ actual execution order. Previews are network-free and include budgets, pricing a
 conditional ceilings and schedule. CLI live execution requires an explicit --allow-paid flag
 as well as credentials. No paid requests have been made during Phase 2 development.
 
+`smoke.py` wraps the existing three-run protocol with a sourced conditional cost check, model
+metadata access preflight, zero SDK retries, and exclusive timestamped output creation. It does
+not alter tasks or the fault schedule. Smoke suites stop at the first provider/harness failure
+or unknown usage and record unstarted runs in the manifest. A conditional estimate is not a
+provider billing cap; it reserves all permitted generation requests including a failed one.
+
 Summaries keep artifact version and experiment kind separate. The dashboard loads the latest
 manifest, supports filtering old/new data, shows fixed-scale separate metrics, highlights
 fault/recovery lineage and expands raw events. Playback only reads saved data; it is not

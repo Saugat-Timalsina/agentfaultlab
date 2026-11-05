@@ -90,3 +90,19 @@ actual executions without a separate handler cap. Cooperative cancellation, synt
 correlated corruption and approximate billing remain limitations, not newly fixed defects.
 The new recheck configuration uses protocol `phase2-hardening-v1` and a fresh output directory;
 the serialized artifact schema remains backward-compatible `phase2-v1`.
+
+## Smoke execution preparation — 2026-11-04
+
+**Confirmed defect:** `run_experiment` retained a provider/harness failure but proceeded to the
+next scheduled run. For the authorized smoke test this could repeatedly spend on a broken
+configuration. Smoke suites now stop on the first provider/harness failure or unknown usage;
+partial manifests separate actual order from planned order and count unstarted runs. The
+three-run launcher reuses the original config, guards a conditional estimate within the $1
+allowance, checks model access with retries disabled, and requires a new timestamped directory.
+The existing smoke `run` path also uses these guards. This does not authorize repeated attempts.
+
+The missing-key path, model metadata auth/access failures, scope/cost guards and suite stopping
+were tested offline. Final checks: 119 tests passed, one live test deselected; lint, format and
+dependency checks passed. See the [readiness report](live-smoke-readiness-20261104.md). Credentials
+were absent, so no account model-access check, paid request, live trace review or live smoke
+result is claimed. Pilot execution remains unauthorized.

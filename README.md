@@ -118,10 +118,16 @@ After reviewing the concrete protocol, provide the key privately using macOS zsh
 read -s "OPENAI_API_KEY?OpenAI API key: "
 export OPENAI_API_KEY
 # Explicit authorization for three paid smoke runs:
-agentfaultlab run --config configs/phase2/smoke-v1.yaml --allow-paid
+agentfaultlab smoke --dry-run --spending-allowance 1
+agentfaultlab smoke --allow-paid --spending-allowance 1
 ```
 
 The command is provided for the user; it has **not** been executed during development.
+The guarded launcher reuses the existing smoke configuration, checks model access before
+generation, creates a fresh timestamped output directory, caps the conditional estimate at $1,
+and stops the suite after provider/harness errors or unavailable usage. Run it once; a failure
+does not authorize another attempt. See the [current readiness report](docs/live-smoke-readiness-20261104.md):
+credentials were unavailable here, so the real live path and pilot readiness remain unverified.
 Do not start the pilot until you have reviewed the smoke artifacts and authorized it separately.
 The CLI refuses live execution without `--allow-paid`. Credentials come from the environment;
 .env files are not automatically loaded. Never put a key in YAML, source, traces or commits.

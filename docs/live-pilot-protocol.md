@@ -28,7 +28,8 @@ configurations**, not pure model intelligence. No live execution is authorized b
 `configs/phase2/smoke-v1.yaml`: one resilient run each of fault-free lookup, transient lookup
 exception, and correlation-service committed write with lost response. This checks tool calling,
 call/result ordering, traces, resets, usage accounting and the write-reconciliation boundary.
-It is not used to rank policies. Results go only to `results/live-smoke-v1`.
+It is not used to rank policies. The guarded launcher uses a fresh UTC timestamp appended to
+`results/live-smoke-v1`, preserving prior attempts and the original configuration.
 
 Smoke acceptance: no harness or provider errors, meaningful native calls, serializable
 transcripts/traces, usage present on successful responses, fault activation recorded, and no
@@ -103,6 +104,7 @@ Preview requires no key and makes no provider requests:
 ```sh
 source .venv/bin/activate
 agentfaultlab run --config configs/phase2/smoke-v1.yaml --dry-run
+agentfaultlab smoke --dry-run --spending-allowance 1
 agentfaultlab run --config configs/phase2/pilot-v1.yaml --dry-run
 ```
 
@@ -110,7 +112,7 @@ After reviewing this protocol and supplying the key privately in your environmen
 command explicitly authorizes the three smoke runs:
 
 ```sh
-agentfaultlab run --config configs/phase2/smoke-v1.yaml --allow-paid
+agentfaultlab smoke --allow-paid --spending-allowance 1
 ```
 
 Do not run the pilot automatically. Its separate command, after smoke review and authorization:
@@ -131,3 +133,9 @@ The [follow-up audit](phase2-audit.md#follow-up-audit--2026-11-04) strengthens e
 and provider-protocol handling before any paid execution. The separate offline recheck uses
 `configs/phase2/offline-hardening-v1.yaml`; it is excluded from smoke/pilot results. See
 [actual verification](phase2-verification-20261104.md) for readiness checks and preview values.
+
+The user subsequently authorized only one three-run smoke attempt within $1. Credentials were
+unavailable, so no provider calls were made. The [smoke readiness report](live-smoke-readiness-20261104.md)
+records current pricing, setup instructions, remaining checks and an explicitly scripted trace
+walkthrough. Smoke execution now stops on provider/harness failures or unavailable usage and
+records unstarted runs. The 60-run pilot remains unauthorized and must wait for smoke review.
